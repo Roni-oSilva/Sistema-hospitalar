@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, ClipboardList, Hand, UserCheck } from 'lucide-react';
 import { CLAIM_STALE_MINUTES } from '@hospital/shared';
 import { ApiError, api, post } from '@/lib/api';
+import { serverNow } from '@/lib/clock';
 import { fmtMinutes, fmtTime, minutesSince } from '@/lib/format';
 import { useFallbackInterval } from '@/lib/realtime';
 import type { TriageQueueItem } from '@/lib/types';
@@ -15,9 +16,9 @@ import { Button, Card, CardHeader, EmptyState, PageHeader, Spinner, cx } from '@
 import { useToast } from '@/components/toast';
 
 function useNow(ms = 30_000): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => serverNow());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
+    const t = setInterval(() => setNow(serverNow()), ms);
     return () => clearInterval(t);
   }, [ms]);
   return now;

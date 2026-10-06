@@ -5,6 +5,8 @@
  *  - o funcionário NUNCA vê erro técnico: a API já devolve mensagens seguras; falhas de rede viram texto claro.
  */
 
+import { noteServerDate } from './clock';
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -52,6 +54,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
         .join('&')
     : '';
   let res: Response;
+  const sentAt = Date.now();
   try {
     res = await fetch(`/api${path}${qs === '?' ? '' : qs}`, {
       method,
@@ -69,6 +72,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     if ((e as Error).name === 'AbortError') throw e;
     throw new ApiError(0, 'NETWORK', 'Sem conexão com o servidor. Verifique a rede e tente novamente.');
   }
+  noteServerDate(res.headers.get('date'), sentAt, Date.now());
 
   if (res.status === 204) {
     activityListeners.forEach((l) => l());

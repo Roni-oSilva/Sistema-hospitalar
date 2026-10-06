@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, BellRing, DoorOpen, Megaphone, Undo2 } from 'lucide-react';
 import { PERMISSIONS } from '@hospital/shared';
 import { ApiError, api, post } from '@/lib/api';
+import { serverNow } from '@/lib/clock';
 import { fmtMinutes, fmtTime, minutesSince } from '@/lib/format';
 import { prefs } from '@/lib/prefs';
 import { useFallbackInterval } from '@/lib/realtime';
@@ -17,9 +18,9 @@ import { Alert, Button, Card, CardHeader, EmptyState, PageHeader, Select, Spinne
 import { useToast } from '@/components/toast';
 
 function useNow(ms = 30_000): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => serverNow());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
+    const t = setInterval(() => setNow(serverNow()), ms);
     return () => clearInterval(t);
   }, [ms]);
   return now;

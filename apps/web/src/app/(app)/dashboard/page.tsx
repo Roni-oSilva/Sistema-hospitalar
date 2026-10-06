@@ -10,6 +10,7 @@ import { useFallbackInterval } from '@/lib/realtime';
 import type { Summary } from '@/lib/types';
 import { RiskBadge } from '@/components/clinical';
 import { Alert, Card, CardHeader, Input, PageHeader, Spinner, Stat, cx } from '@/components/ui';
+import { serverNow } from '@/lib/clock';
 
 interface Indicators {
   date: string;
@@ -22,7 +23,7 @@ interface Indicators {
 }
 
 export default function DashboardPage() {
-  const today = localDateString(new Date());
+  const today = localDateString(new Date(serverNow()));
   const [date, setDate] = useState(today);
   const interval = useFallbackInterval();
   const q = useQuery({

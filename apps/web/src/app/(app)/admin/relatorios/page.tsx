@@ -7,6 +7,7 @@ import { ApiError, api } from '@/lib/api';
 import { fmtAvgMinutes, fmtDateOnly } from '@/lib/format';
 import { RiskBadge } from '@/components/clinical';
 import { Alert, Card, CardHeader, Input, PageHeader, Spinner, Stat } from '@/components/ui';
+import { serverNow } from '@/lib/clock';
 
 interface Overview {
   period: { from: string; to: string };
@@ -24,7 +25,7 @@ const m = fmtAvgMinutes;
 
 /** Relatórios agregados por período. Grupos de acessibilidade com menos de 3 casos aparecem como "<3" (anti-reidentificação). */
 export default function ReportsPage() {
-  const today = localDateString(new Date());
+  const today = localDateString(new Date(serverNow()));
   const monthStart = `${today.slice(0, 8)}01`;
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(today);

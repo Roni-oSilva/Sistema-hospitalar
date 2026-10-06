@@ -1,4 +1,5 @@
 import { DEFAULT_HOSPITAL_TIMEZONE } from '@hospital/shared';
+import { serverNow } from './clock';
 
 /** Datas sempre no fuso do hospital (America/Belem), independentemente do relógio do computador. */
 const TZ = process.env.NEXT_PUBLIC_HOSPITAL_TIMEZONE ?? DEFAULT_HOSPITAL_TIMEZONE;
@@ -31,7 +32,7 @@ export function fmtMinutes(min: number): string {
 /** Médias: "< 1 min" em vez de "agora" (que só faz sentido para esperas em curso). */
 export const fmtAvgMinutes = (min: number | null): string => (min === null ? '—' : min < 1 ? '< 1 min' : fmtMinutes(Math.round(min)));
 
-export const minutesSince = (iso: string, now: number = Date.now()): number => Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
+export const minutesSince = (iso: string, now: number = serverNow()): number => Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60000));
 
 export const fmtPhone = (digits: string): string => {
   const d = digits.replace(/\D/g, '');

@@ -8,11 +8,23 @@ import { REALTIME_EVENTS, type PanelCallEvent } from '@hospital/shared';
 import { SOCKET_URL } from '@/lib/realtime';
 import { prefs } from '@/lib/prefs';
 import { fmtTime } from '@/lib/format';
+import { noteServerDate, serverNow } from '@/lib/clock';
 import { LogoMark } from '@/components/logo';
 
 interface PanelData {
   hospitalName: string;
   calls: PanelCallEvent[];
+}
+
+const isPortuguese = (v: SpeechSynthesisVoice) => v.lang.toLowerCase().replace('_', '-').startsWith('pt');
+
+/**
+ * Vozes em português, da melhor para a pior. As vozes instaladas no aparelho (localService) vêm primeiro:
+ * as "online" do Chrome (ex.: "Google português do Brasil") param de falar quando a internet cai.
+ */
+function rankPortugueseVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
+  const score = (v: SpeechSynthesisVoice) => (v.localService ? 0 : 10) + (v.lang.toLowerCase().replace('_', '-') === 'pt-br' ? 0 : 1);
+  return voices.filter(isPortuguese).sort((a, b) => score(a) - score(b));
 }
 
 /**
@@ -26,10 +38,20 @@ function Panel() {
   const [online, setOnline] = useState(true);
   const [flash, setFlash] = useState(0);
   const [sound, setSound] = useState(false);
-  const [clock, setClock] = useState(() => new Date());
+  const [clock, setClock] = useState(() => new Date(serverNow()));
   const [denied, setDenied] = useState(false);
   const soundRef = useRef(false);
   const audioRef = useRef<AudioContext | null>(null);
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+
+  // a lista de vozes chega de forma assíncrona em alguns navegadores
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    const refresh = () => (voicesRef.current = rankPortugueseVoices(window.speechSynthesis.getVoices()));
+    refresh();
+    window.speechSynthesis.addEventListener('voiceschanged', refresh);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', refresh);
+  }, []);
 
   useEffect(() => {
     setSound(prefs.panelSound());
@@ -40,7 +62,10 @@ function Panel() {
 
   const load = useCallback(async () => {
     try {
+      const sentAt = Date.now();
       const res = await fetch(`/api/public/panel${key ? `?key=${encodeURIComponent(key)}` : ''}`, { cache: 'no-store' });
+      noteServerDate(res.headers.get('date'), sentAt, Date.now());
+      setClock(new Date(serverNow()));
       if (res.status === 403) {
         setDenied(true);
         return;
@@ -68,10 +93,19 @@ function Panel() {
         o.stop(ctx.currentTime + t + 0.26);
       });
       if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(`Senha ${c.ticket.split('').join(' ')}. ${c.room}.`);
-        u.lang = 'pt-BR';
-        u.rate = 0.9;
-        window.setTimeout(() => window.speechSynthesis.speak(u), 650);
+        const text = `Senha ${c.ticket.split('').join(' ')}. ${c.room}.`;
+        const speak = (voices: SpeechSynthesisVoice[]) => {
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = voices[0]?.lang ?? 'pt-BR';
+          if (voices[0]) u.voice = voices[0];
+          u.rate = 0.9;
+          // voz online sem internet falha com erro: tenta a próxima (instalada) em vez de ficar em silêncio
+          u.onerror = () => {
+            if (voices.length > 1) speak(voices.slice(1));
+          };
+          window.speechSynthesis.speak(u);
+        };
+        window.setTimeout(() => speak(voicesRef.current), 650);
       }
     } catch {
       /* sem áudio disponível */
@@ -93,7 +127,7 @@ function Panel() {
       announce(c);
     });
     const poll = setInterval(() => void load(), 30_000); // rede de segurança
-    const tick = setInterval(() => setClock(new Date()), 15_000);
+    const tick = setInterval(() => setClock(new Date(serverNow())), 15_000);
     return () => {
       socket.close();
       clearInterval(poll);
