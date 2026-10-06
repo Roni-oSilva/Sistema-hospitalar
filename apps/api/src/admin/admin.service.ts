@@ -126,6 +126,7 @@ export class AdminService {
   async auditLogs(actor: Actor, q: AuditQuery) {
     const where: Prisma.AuditLogWhereInput = {
       ...(q.userId ? { userId: q.userId } : {}),
+      ...(q.username ? { username: { contains: q.username.toLowerCase() } } : {}),
       ...(q.action ? { action: { contains: q.action.toUpperCase() } } : {}),
       ...(q.entityType ? { entityType: q.entityType } : {}),
       ...(q.patientId ? { patientId: q.patientId } : {}),

@@ -279,10 +279,19 @@ export class PatientsService {
     return this.toDto(created, actor);
   }
 
-  async update(actor: Actor, id: string, input: UpdatePatientInput) {
+  async update(actor: Actor, id: string, inputRaw: UpdatePatientInput) {
+    let input = inputRaw;
     const updated = await this.prisma.run(async (tx) => {
       const before = await tx.patient.findUnique({ where: { id }, include: PATIENT_INCLUDE });
       if (!before) throw notFound('Paciente não encontrado.');
+
+      // quem não pode VER documentos também não pode alterá-los (os campos chegam vazios/mascarados e apagariam os dados)
+      const canDocs = can(actor, PERMISSIONS.PATIENTS_VIEW_DOCUMENTS);
+      if (!canDocs) {
+        input = { ...input, cpf: before.cpf ?? undefined, cns: before.cns ?? undefined, rg: before.rg ?? undefined };
+        if (input.guardian && before.guardian) input = { ...input, guardian: { ...input.guardian, cpf: before.guardian.cpf ?? undefined } };
+      }
+
       await this.assertNoDocumentDuplicate(tx, input, id);
       await this.assertNoLikelyDuplicate(tx, input.fullName, input.birthDate, input.confirmNotDuplicate, id);
 

@@ -59,6 +59,7 @@ export const updateSettingSchema = z.object({
 
 export const auditQuerySchema = z.object({
   userId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
+  username: optionalText(60),
   action: optionalText(60),
   entityType: optionalText(60),
   patientId: z.preprocess(emptyToUndefined, uuidSchema.optional()),
