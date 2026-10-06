@@ -16,6 +16,12 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PatientsModule } from './patients/patients.module';
 import { AttendancesModule } from './attendances/attendances.module';
+import { TriageModule } from './triage/triage.module';
+import { MedicalModule } from './medical/medical.module';
+import { PublicModule } from './public/public.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { ReportsModule } from './reports/reports.module';
+import { AdminModule } from './admin/admin.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -45,6 +51,12 @@ import { HealthController } from './health/health.controller';
     CoreModule,
     PatientsModule,
     AttendancesModule,
+    TriageModule,
+    MedicalModule,
+    PublicModule,
+    DashboardModule,
+    ReportsModule,
+    AdminModule,
   ],
   controllers: [HealthController],
   providers: [

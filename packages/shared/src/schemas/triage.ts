@@ -79,3 +79,11 @@ export type ClassifyInput = z.infer<typeof classifySchema>;
 export const releaseTriageSchema = z.object({
   reason: requiredText(3, 200, 'Motivo'),
 });
+
+export const startTriageSchema = z.object({
+  /** Assumir uma triagem abandonada (sem atividade há mais de CLAIM_STALE_MINUTES). Fica registrado na auditoria. */
+  takeover: z.boolean().default(false),
+});
+
+/** Minutos sem atividade a partir dos quais outro profissional pode assumir um paciente "preso" com um colega. */
+export const CLAIM_STALE_MINUTES = 15;

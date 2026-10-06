@@ -64,3 +64,13 @@ export const addMedicalNoteSchema = z.object({
 export const cancelByDoctorSchema = z.object({
   reason: requiredText(5, 300, 'Motivo do cancelamento'),
 });
+
+export const callSpecificSchema = z.object({
+  roomId: uuidSchema,
+  /** Assumir um paciente chamado por outro médico e abandonado (sem atividade há mais de 15 min). */
+  takeover: z.boolean().default(false),
+});
+
+export const releaseCallSchema = z.object({
+  reason: optionalText(200, 'Motivo'),
+});
