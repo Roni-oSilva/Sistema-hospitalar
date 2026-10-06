@@ -50,7 +50,9 @@ export function AccessibilityEditor({ value, onChange, ageYears, errors = {}, di
     <div className="flex flex-col gap-5">
       <p className="flex items-start gap-2 rounded-[var(--radius-control)] bg-sunken px-3 py-2 text-sm text-ink-2">
         <Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
-        Estas informações orientam o apoio ao paciente (acesso, comunicação, acompanhante). Elas <strong>não</strong> alteram a classificação de risco, que é feita pela triagem.
+        <span>
+          Estas informações orientam o apoio ao paciente (acesso, comunicação, acompanhante). Elas <strong>não</strong> alteram a classificação de risco, que é feita pela triagem.
+        </span>
       </p>
 
       <fieldset disabled={disabled}>
@@ -92,7 +94,7 @@ export function AccessibilityEditor({ value, onChange, ageYears, errors = {}, di
           <p id="dtype" className="mb-2 text-sm font-semibold text-ink-2">
             Tipo de deficiência
           </p>
-          <div role="radiogroup" aria-labelledby="dtype" className="mb-4 flex flex-wrap gap-2">
+          <div role="radiogroup" aria-labelledby="dtype" className="flex flex-wrap gap-2">
             {DISABILITY_TYPES.map((t) => (
               <label key={t} className={cx('flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4', value.disabilityType === t ? 'border-accent bg-accent-soft font-semibold' : 'border-line bg-surface')}>
                 <input type="radio" name="disabilityType" className="accent-[var(--color-accent)]" checked={value.disabilityType === t} onChange={() => onChange({ ...value, disabilityType: t })} />
@@ -100,8 +102,15 @@ export function AccessibilityEditor({ value, onChange, ageYears, errors = {}, di
               </label>
             ))}
           </div>
-          {errors.disabilityType && <p className="mb-2 text-sm text-danger">{errors.disabilityType}</p>}
-          <p className="mb-2 text-sm font-semibold text-ink-2">Necessidades específicas</p>
+          {errors.disabilityType && <p className="mt-2 text-sm text-danger">{errors.disabilityType}</p>}
+        </fieldset>
+      )}
+
+      {/* Necessidades valem para qualquer perfil (idoso de bengala, gestante com acompanhante…), não só PCD.
+          Ficam visíveis enquanto houver alguma marcada, para nunca guardar uma necessidade que a tela não mostra. */}
+      {(derived.size > 0 || value.flags.length > 0 || value.needs.length > 0) && (
+        <fieldset disabled={disabled}>
+          <legend className="mb-2 text-sm font-semibold text-ink-2">Necessidades específicas</legend>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {ACCESSIBILITY_NEEDS.map((n) => (
               <label key={n} className={cx('flex min-h-11 cursor-pointer items-center gap-3 rounded-[var(--radius-control)] border px-3', value.needs.includes(n) ? 'border-accent bg-accent-soft' : 'border-line bg-surface')}>

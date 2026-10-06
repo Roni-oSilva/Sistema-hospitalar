@@ -8,7 +8,7 @@ import { RISK_META, SEX_LABELS, type RiskLevel } from '@hospital/shared';
 import { ApiError, api, post, put } from '@/lib/api';
 import { fmtDateTime, fmtMinutes, fmtTime, minutesSince } from '@/lib/format';
 import type { TriageView } from '@/lib/types';
-import { AccessibilityBadges, RiskBadge, RiskPicker, StatusBadge, VitalsGrid } from '@/components/clinical';
+import { AccessibilityBadges, AccessibilityDetails, RiskBadge, RiskPicker, StatusBadge, VitalsGrid } from '@/components/clinical';
 import { AccessibilityEditor, fromAccessibility, toAccessibilityInput, type AccessibilityValue } from '@/components/accessibility-editor';
 import { VitalsForm, emptyVitals, parseVitals, vitalsHasValue, type VitalsDraft } from '@/components/vitals-form';
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea } from '@/components/ui';
@@ -273,6 +273,7 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
               </Button>
             )}
           </div>
+          <AccessibilityDetails accessibility={data.accessibility} className="mt-1" />
         </div>
         <div className="flex flex-col items-end gap-2">
           <StatusBadge status={data.attendance.status} />

@@ -59,9 +59,11 @@ export default function PermissionsPage() {
         Permissões marcadas com “dado sensível” liberam acesso a informações de saúde ou documentos. Toda leitura clínica fica registrada na auditoria.
       </Alert>
       <Card>
-        <div className="overflow-x-auto">
+        {/* Cabeçalho fixo só quando a tabela cabe sem rolagem lateral: dentro de um contêiner com overflow,
+            o "sticky" passaria a valer para o contêiner e o cabeçalho cobriria as primeiras linhas. */}
+        <div className="overflow-x-auto xl:overflow-visible">
           <table className="w-full text-left">
-            <thead className="sticky top-16 z-10 border-b border-line bg-paper">
+            <thead className="z-10 border-b border-line bg-paper xl:sticky xl:top-16">
               <tr>
                 <th scope="col" className="px-5 py-3 text-xs font-bold tracking-wider text-ink-3 uppercase">Permissão</th>
                 {q.data.roles.map((r) => (

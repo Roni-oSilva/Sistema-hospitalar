@@ -45,6 +45,14 @@ export default function MedicalQueuePage() {
   useEffect(() => {
     if (rooms.data && roomId && !rooms.data.some((r) => r.id === roomId)) setRoomId('');
   }, [rooms.data, roomId]);
+  // sem preferência salva (outro computador, navegador limpo): assume o consultório onde o médico já está com paciente
+  const mineRoom = q.data?.mine?.room;
+  useEffect(() => {
+    if (!roomId && mineRoom && rooms.data) {
+      const r = rooms.data.find((x) => x.name === mineRoom);
+      if (r) setRoomId(r.id);
+    }
+  }, [roomId, mineRoom, rooms.data]);
 
   const onCalled = (r: CallResult) => {
     setLastCall(r);
@@ -115,7 +123,7 @@ export default function MedicalQueuePage() {
               {rooms.data?.map((r) => (
                 <option key={r.id} value={r.id} disabled={Boolean(r.occupiedBy) && r.id !== roomId}>
                   {r.name}
-                  {r.occupiedBy ? ` — em uso (${r.occupiedBy})` : ''}
+                  {r.occupiedBy ? (r.name === mineRoom ? ' — você está neste consultório' : ` — em uso (${r.occupiedBy})`) : ''}
                 </option>
               ))}
             </Select>
@@ -248,12 +256,23 @@ function QueuePatient({ item, now }: { item: MedicalQueueItem; now: number }) {
       </p>
       <p className="mt-1 flex flex-wrap gap-x-4 text-ink-2">
         <span className="tabular font-mono text-sm">{item.code}</span>
-        <span className={cx(overdue && 'font-bold text-danger')}>
-          {overdue && <AlertTriangle className="mr-1 inline size-4" aria-hidden />}
-          Esperando <span className="tabular font-mono">{fmtMinutes(wait)}</span>
-          <span className="text-sm text-ink-3"> (alvo {fmtMinutes(item.maxWaitMinutes)})</span>
-          {overdue && <span className="sr-only"> — acima do tempo-alvo</span>}
-        </span>
+        {item.queueStatus === 'WAITING' ? (
+          <span className={cx(overdue && 'font-bold text-danger')}>
+            {overdue && <AlertTriangle className="mr-1 inline size-4" aria-hidden />}
+            Esperando <span className="tabular font-mono">{fmtMinutes(wait)}</span>
+            <span className="text-sm text-ink-3"> (alvo {fmtMinutes(item.maxWaitMinutes)})</span>
+            {overdue && <span className="sr-only"> — acima do tempo-alvo</span>}
+          </span>
+        ) : (
+          // já chamado/em consulta: o relógio de espera parou na chamada
+          <span>
+            {item.queueStatus === 'CALLED' ? `Chamado às ${fmtTime(item.calledAt)}` : 'Em atendimento'}
+            {item.room ? ` · ${item.room}` : ''}
+            {item.calledAt && (
+              <span className="text-sm text-ink-3"> (esperou {fmtMinutes(minutesSince(item.enqueuedAt, new Date(item.calledAt).getTime()))})</span>
+            )}
+          </span>
+        )}
       </p>
       {item.chiefComplaint && <p className="mt-0.5 text-ink-3">Queixa: {item.chiefComplaint}</p>}
       <div className="mt-1.5">

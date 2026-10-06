@@ -137,7 +137,7 @@ function PatientResult({ p }: { p: PatientSearchItem }) {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Link href={`/recepcao/pacientes/${p.id}`} className="inline-flex h-11 items-center gap-2 rounded-full px-4 font-semibold text-accent hover:bg-accent-soft">
+        <Link href={`/recepcao/pacientes/${p.id}`} aria-label={`Cadastro de ${p.displayName}`} className="inline-flex h-11 items-center gap-2 rounded-full px-4 font-semibold text-accent hover:bg-accent-soft">
           <FileUser className="size-5" aria-hidden /> Cadastro
         </Link>
         {active ? (

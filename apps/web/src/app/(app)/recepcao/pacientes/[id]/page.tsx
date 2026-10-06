@@ -10,7 +10,7 @@ import { fmtDateOnly, fmtDateTime, fmtPhone } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import type { AttendanceListItem, PatientDetail } from '@/lib/types';
 import { PatientForm } from '@/components/patient-form';
-import { AccessibilityBadges, StatusBadge } from '@/components/clinical';
+import { AccessibilityBadges, AccessibilityDetails, StatusBadge } from '@/components/clinical';
 import { Alert, Button, Card, CardHeader, DataItem, PageHeader, Spinner } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
@@ -96,7 +96,14 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
           <Card>
             <CardHeader title="Acessibilidade" />
             <div className="p-5">
-              {p.accessibility.effectiveFlags.length ? <AccessibilityBadges accessibility={p.accessibility} ageYears={p.ageYears} /> : <p className="text-ink-3">Nenhuma necessidade registrada.</p>}
+              {p.accessibility.effectiveFlags.length ? (
+                <>
+                  <AccessibilityBadges accessibility={p.accessibility} ageYears={p.ageYears} />
+                  <AccessibilityDetails accessibility={p.accessibility} className="mt-2" />
+                </>
+              ) : (
+                <p className="text-ink-3">Nenhuma necessidade registrada.</p>
+              )}
             </div>
           </Card>
         </div>

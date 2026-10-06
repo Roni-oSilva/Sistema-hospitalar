@@ -3,6 +3,7 @@
 import { useId, type KeyboardEvent, type ReactNode } from 'react';
 import {
   Accessibility as AccessibilityIcon,
+  AlertOctagon,
   Ban,
   Baby,
   BellRing,
@@ -24,6 +25,7 @@ import {
   PencilLine,
   Pill,
   ShieldAlert,
+  ShieldCheck,
   Stethoscope,
   Undo2,
   UserRound,
@@ -32,6 +34,8 @@ import {
 } from 'lucide-react';
 import {
   ACCESSIBILITY_FLAG_META,
+  ACCESSIBILITY_NEED_LABELS,
+  DISABILITY_LABELS,
   RISK_LEVELS,
   RISK_META,
   STATUS_LABELS,
@@ -100,35 +104,40 @@ export function RiskPicker({ value, onChange, disabled, name = 'risk' }: { value
     }
   };
   return (
-    <div role="radiogroup" aria-labelledby={`${id}-label`} onKeyDown={onKey} className="grid gap-2 sm:grid-cols-5">
-      <span id={`${id}-label`} className="sr-only">
-        Classificação de risco (teclas 1 a 5)
-      </span>
-      {RISK_LEVELS.map((level, i) => {
-        const selected = value === level;
-        const s = RISK_STYLE[level];
-        return (
-          <label
-            key={level}
-            className={cx(
-              'relative flex cursor-pointer flex-col gap-1 rounded-[var(--radius-card)] border-2 px-3 py-3 transition-shadow focus-within:ring-[3px] focus-within:ring-accent/70',
-              selected ? cx(s.solid, 'border-transparent shadow-md') : cx('bg-surface hover:shadow-sm', 'border-line'),
-              disabled && 'cursor-not-allowed opacity-60',
-            )}
-          >
-            <input type="radio" name={`${name}-${id}`} value={level} checked={selected} disabled={disabled} onChange={() => onChange(level)} className="sr-only" />
-            <span className={cx('flex items-center gap-2 text-base font-bold uppercase', !selected && s.text)}>
-              <RiskShape level={level} className="size-5" />
-              {RISK_META[level].label}
-            </span>
-            <span className={cx('text-xs', selected ? 'opacity-90' : 'text-ink-3')}>{RISK_META[level].description}</span>
-            <span className={cx('absolute top-2 right-2 font-mono text-xs', selected ? 'opacity-80' : 'text-ink-3')} aria-hidden>
-              {i + 1}
-            </span>
-            {selected && <CheckCircle2 className="absolute right-2 bottom-2 size-5" aria-label="selecionado" />}
-          </label>
-        );
-      })}
+    // Lista vertical em colunas estreitas (lateral da triagem); 5 colunas só quando o cartão é largo.
+    <div className="@container">
+      <div role="radiogroup" aria-labelledby={`${id}-label`} onKeyDown={onKey} className="grid gap-2 @3xl:grid-cols-5">
+        <span id={`${id}-label`} className="sr-only">
+          Classificação de risco (teclas 1 a 5)
+        </span>
+        {RISK_LEVELS.map((level, i) => {
+          const selected = value === level;
+          const s = RISK_STYLE[level];
+          return (
+            <label
+              key={level}
+              className={cx(
+                'relative flex min-h-14 cursor-pointer items-center gap-x-3 gap-y-1 rounded-[var(--radius-card)] border-2 px-3 py-2.5 transition-shadow focus-within:ring-[3px] focus-within:ring-accent/70 @3xl:flex-col @3xl:items-start @3xl:py-3',
+                selected ? cx(s.solid, 'border-transparent shadow-md') : cx('bg-surface hover:shadow-sm', 'border-line'),
+                disabled && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <input type="radio" name={`${name}-${id}`} value={level} checked={selected} disabled={disabled} onChange={() => onChange(level)} className="sr-only" />
+              <span className={cx('flex w-40 shrink-0 items-center gap-2 text-base leading-tight font-bold uppercase @3xl:w-auto @3xl:pr-5', !selected && s.text)}>
+                <RiskShape level={level} className="size-5 shrink-0" />
+                {RISK_META[level].label}
+              </span>
+              <span className={cx('text-sm leading-snug @3xl:text-xs', selected ? 'opacity-90' : 'text-ink-3')}>{RISK_META[level].description}</span>
+              <span className="ml-auto flex shrink-0 items-center gap-1.5 @3xl:absolute @3xl:top-2 @3xl:right-2">
+                {selected && <CheckCircle2 className="size-5" aria-label="selecionado" />}
+                <span className={cx('font-mono text-xs', selected ? 'opacity-80' : 'text-ink-3')} aria-hidden>
+                  {i + 1}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -229,6 +238,37 @@ export function AccessibilityBadges({ accessibility, ageYears, max, size = 'md' 
   );
 }
 
+/** Complemento dos selos: tipo de deficiência e necessidades (ex.: "Deficiência: Física · Necessidades: Cadeira de rodas"). */
+export function AccessibilityDetails({ accessibility, className }: { accessibility: Accessibility; className?: string }) {
+  const parts: string[] = [];
+  if (accessibility.disabilityType && accessibility.disabilityType !== 'NAO_INFORMADO') parts.push(`Deficiência: ${DISABILITY_LABELS[accessibility.disabilityType]}`);
+  const needs = accessibility.needs.filter((n) => n !== 'OUTRA').map((n) => ACCESSIBILITY_NEED_LABELS[n]);
+  if (accessibility.otherNeedDescription) needs.push(accessibility.otherNeedDescription);
+  if (needs.length) parts.push(`Necessidades: ${needs.join(', ')}`);
+  if (!parts.length) return null;
+  return <p className={cx('text-sm text-ink-2', className)}>{parts.join(' · ')}</p>;
+}
+
+/** "Nega", "nenhuma", "sem alergias"… não é alerta: o destaque vermelho fica reservado para alergia de fato. */
+const NO_ALLERGY = /^\s*(nega(m|do)?|nenhum[a]?|n[aã]o( possui| tem| h[aá])?|sem alergias?|nkda|ausentes?)\b[\s.!]*(alergias?( conhecidas?)?)?[\s.!]*$/i;
+export const deniesAllergy = (text: string): boolean => NO_ALLERGY.test(text);
+
+export function AllergyNote({ allergies, className }: { allergies: string | null | undefined; className?: string }) {
+  if (!allergies) return null;
+  if (deniesAllergy(allergies)) {
+    return (
+      <p className={cx('flex items-center gap-2 rounded-[var(--radius-control)] border border-line bg-sunken px-4 py-2 font-semibold text-ink-2', className)} role="note">
+        <ShieldCheck className="size-5 shrink-0 text-ok" aria-hidden /> Alergias: {allergies}
+      </p>
+    );
+  }
+  return (
+    <p className={cx('flex items-center gap-2 rounded-[var(--radius-control)] border-2 border-danger bg-danger-soft px-4 py-2 font-bold text-danger', className)} role="note">
+      <AlertOctagon className="size-5 shrink-0" aria-hidden /> Alergias: {allergies}
+    </p>
+  );
+}
+
 // ───────────────────────────── Linha do tempo ─────────────────────────────
 
 const EVENT_ICON: Record<TimelineEventType, LucideIcon> = {
@@ -321,9 +361,10 @@ export function VitalsGrid({ vitals, compact }: { vitals: Vitals | null; compact
               {i.abbr}
             </abbr>
           </dt>
-          <dd className="tabular font-display text-xl font-extrabold whitespace-nowrap text-ink">
-            {i.value}
-            {i.unit && <span className="ml-1 text-xs font-medium text-ink-3">{i.unit}</span>}
+          {/* a unidade quebra para a linha de baixo antes de invadir o quadro vizinho (ex.: 182/106 mmHg) */}
+          <dd className="tabular flex flex-wrap items-baseline gap-x-1 font-display text-xl font-extrabold text-ink">
+            <span className="whitespace-nowrap">{i.value}</span>
+            {i.unit && <span className="text-xs font-medium text-ink-3">{i.unit}</span>}
           </dd>
         </div>
       ))}

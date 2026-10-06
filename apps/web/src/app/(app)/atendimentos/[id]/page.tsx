@@ -9,7 +9,7 @@ import { ApiError, api, post } from '@/lib/api';
 import { fmtDateOnly, fmtDateTime, fmtTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import type { AttendanceDetail, TimelineEvent } from '@/lib/types';
-import { AccessibilityBadges, RiskBadge, StatusBadge, Timeline } from '@/components/clinical';
+import { AccessibilityBadges, AccessibilityDetails, RiskBadge, StatusBadge, Timeline } from '@/components/clinical';
 import { Alert, Button, Card, CardHeader, DataItem, Field, PageHeader, Spinner, Textarea } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
@@ -109,6 +109,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
             <div className="border-t border-line px-5 py-4">
               <p className="mb-2 text-xs font-semibold tracking-wide text-ink-3 uppercase">Acessibilidade nesta visita</p>
               <AccessibilityBadges accessibility={d.accessibility} ageYears={d.patient.ageYears} />
+              <AccessibilityDetails accessibility={d.accessibility} className="mt-2" />
             </div>
           )}
         </Card>

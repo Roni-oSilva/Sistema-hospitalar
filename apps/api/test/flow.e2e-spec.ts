@@ -2,6 +2,7 @@
  * Fluxo crítico de ponta a ponta (seção 40 do requisito): os 13 testes, na ordem do atendimento real.
  * Banco PostgreSQL real (hospital_test), app Nest completo (guards, filtros, triggers do banco).
  */
+import { RISK_LEVELS, localDateString } from '@hospital/shared';
 import { Client, TestContext, createTestApp, drainMedicalQueue } from './helpers';
 import { randomCpf, uniqueName } from './fixtures';
 
@@ -309,6 +310,16 @@ describe('Fluxo inicial do atendimento (recepção → triagem → médico → f
     expect((await admin.get(`/api/triage/${attendanceId}`)).status).toBe(403);
     expect((await admin.get('/api/patients/search?q=joao')).status).toBe(403);
     expect((await admin.get('/api/admin/audit-logs')).status).toBe(200);
+    // relatório agregado: risco da mais grave à menos grave (não classificado por último) e setores pelo nome
+    const today = localDateString(new Date(), 'America/Belem');
+    const rep = await admin.get(`/api/reports/overview?from=${today}&to=${today}`);
+    expect(rep.status).toBe(200);
+    const ranks = rep.body.byRisk.map((r: { level: (typeof RISK_LEVELS)[number] | null }) => (r.level === null ? RISK_LEVELS.length : RISK_LEVELS.indexOf(r.level)));
+    expect(ranks.length).toBeGreaterThan(1);
+    expect(ranks).toEqual([...ranks].sort((a: number, b: number) => a - b));
+    const sectors = rep.body.eventsBySector as { code: string; sector: string }[];
+    const triageSector = await ctx.prisma.sector.findUniqueOrThrow({ where: { code: 'TRIAGEM' } });
+    expect(sectors.find((x) => x.code === 'TRIAGEM')?.sector).toBe(triageSector.name);
 
     // triagem: não prescreve, não chama paciente
     expect((await triage.post(`/api/medical/attendances/${attendanceId}/prescription/items`, { medication: 'x', dose: '1', route: 'oral', frequency: '1x', duration: '1d' })).status).toBe(403);

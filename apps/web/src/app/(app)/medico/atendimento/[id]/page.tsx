@@ -5,7 +5,6 @@ import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  AlertOctagon,
   ArrowLeft,
   BellRing,
   CheckCircle2,
@@ -24,7 +23,7 @@ import { OUTCOMES, OUTCOME_LABELS, RISK_META, SEX_LABELS, type Outcome, type Ris
 import { ApiError, api, post, put } from '@/lib/api';
 import { fmtDate, fmtDateTime, fmtTime } from '@/lib/format';
 import type { HistoryItem, MedicalView } from '@/lib/types';
-import { AccessibilityBadges, RiskBadge, RiskPicker, StatusBadge, Timeline, VitalsGrid } from '@/components/clinical';
+import { AccessibilityBadges, AccessibilityDetails, AllergyNote, deniesAllergy, RiskBadge, RiskPicker, StatusBadge, Timeline, VitalsGrid } from '@/components/clinical';
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
@@ -211,7 +210,7 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
             </p>
             <div className="mt-2">
               <AccessibilityBadges accessibility={d.accessibility} ageYears={d.patient.ageYears} />
-              {d.accessibility.needs.length > 0 && <p className="mt-1 text-sm text-ink-3">Necessidades: {d.accessibility.needs.join(', ').toLowerCase().replaceAll('_', ' ')}</p>}
+              <AccessibilityDetails accessibility={d.accessibility} className="mt-1" />
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -219,11 +218,7 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
             <StatusBadge status={d.attendance.status} />
           </div>
         </div>
-        {d.triage?.allergies && (
-          <p className="mt-4 flex items-center gap-2 rounded-[var(--radius-control)] border-2 border-danger bg-danger-soft px-4 py-2 font-bold text-danger" role="note">
-            <AlertOctagon className="size-5 shrink-0" aria-hidden /> Alergias: {d.triage.allergies}
-          </p>
-        )}
+        <AllergyNote allergies={d.triage?.allergies} className="mt-4" />
       </section>
 
       {/* estado da chamada */}
@@ -340,7 +335,7 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
                           <p className="text-ink-2">{h.chiefComplaint}</p>
                           {h.diagnoses.length > 0 && <p className="text-sm">Diagnóstico: {h.diagnoses.map((x) => `${x.code ? `${x.code} ` : ''}${x.description}`).join('; ')}</p>}
                           {h.medications.length > 0 && <p className="text-sm">Medicação: {h.medications.map((m) => `${m.medication} ${m.dose}`).join('; ')}</p>}
-                          {h.allergies && <p className="text-sm font-semibold text-danger">Alergias: {h.allergies}</p>}
+                          {h.allergies && <p className={cx('text-sm', deniesAllergy(h.allergies) ? 'text-ink-2' : 'font-semibold text-danger')}>Alergias: {h.allergies}</p>}
                           <p className="text-xs text-ink-3">{h.doctor}</p>
                         </li>
                       ))}

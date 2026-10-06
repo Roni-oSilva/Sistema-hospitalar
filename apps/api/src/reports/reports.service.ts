@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ACCESSIBILITY_FLAGS, dayRange } from '@hospital/shared';
+import { ACCESSIBILITY_FLAGS, RISK_LEVELS, dayRange } from '@hospital/shared';
 import { APP_CONFIG, AppConfig } from '../config/env';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -69,17 +69,19 @@ export class ReportsService {
       FROM "triage" "t" JOIN "users" "u" ON "u"."id" = "t"."finished_by_id"
       WHERE "t"."finished_at" >= ${start} AND "t"."finished_at" < ${end}
       GROUP BY 1 ORDER BY 2 DESC`;
-    const bySector = await this.prisma.$queryRaw<{ sector: string | null; total: bigint }[]>`
-      SELECT "sector_code" AS sector, count(*) AS total FROM "attendance_events" "e"
+    const bySector = await this.prisma.$queryRaw<{ code: string | null; name: string | null; total: bigint }[]>`
+      SELECT "e"."sector_code" AS code, "s"."name" AS name, count(*) AS total FROM "attendance_events" "e"
       JOIN "attendances" "a" ON "a"."id" = "e"."attendance_id"
+      LEFT JOIN "sectors" "s" ON "s"."code" = "e"."sector_code"
       WHERE "a"."arrived_at" >= ${start} AND "a"."arrived_at" < ${end}
-      GROUP BY 1 ORDER BY 2 DESC`;
+      GROUP BY 1, 2 ORDER BY 3 DESC`;
     const patients = await this.prisma.$queryRaw<{ total: bigint }[]>`
       SELECT count(DISTINCT "patient_id") AS total FROM "attendances" WHERE "arrived_at" >= ${start} AND "arrived_at" < ${end}`;
 
     await this.audit.record(this.prisma, actor, { action: 'REPORT_VIEWED', entityType: 'Report', metadata: { report: 'overview', from, to } });
 
     const small = (n: number): number | string => (n > 0 && n < 3 ? '<3' : n);
+    const rank = (level: string | null): number => (level === null ? RISK_LEVELS.length : RISK_LEVELS.indexOf(level as (typeof RISK_LEVELS)[number]));
     return {
       period: { from, to },
       totals: {
@@ -90,14 +92,17 @@ export class ReportsService {
       },
       averageMinutes: { toTriage: avg(times?.to_triage), medicalWait: avg(times?.medical_wait), total: avg(times?.total) },
       perDay: perDay.map((r) => ({ day: r.day.toISOString().slice(0, 10), total: num(r.total), finished: num(r.finished), cancelled: num(r.cancelled) })),
-      byRisk: byRisk.map((r) => ({ level: r.level, total: num(r.total), avgMedicalWaitMinutes: avg(r.avg_wait) })),
+      // da mais grave à menos grave; "não classificado" por último
+      byRisk: byRisk
+        .map((r) => ({ level: r.level, total: num(r.total), avgMedicalWaitMinutes: avg(r.avg_wait) }))
+        .sort((x, y) => rank(x.level) - rank(y.level)),
       ageBands: ageBands.map((r) => ({ band: r.band, total: num(r.total) })),
       accessibility: ACCESSIBILITY_FLAGS.map((f) => ({ flag: f, total: small(num(accessibility.find((a) => a.flag === f)?.total)) })),
       productivity: {
         doctors: doctors.map((d) => ({ name: d.name, finished: num(d.finished), avgMinutes: avg(d.avg_minutes) })),
         triage: triagers.map((t) => ({ name: t.name, finished: num(t.finished) })),
       },
-      eventsBySector: bySector.map((s) => ({ sector: s.sector ?? 'SISTEMA', total: num(s.total) })),
+      eventsBySector: bySector.map((s) => ({ code: s.code ?? 'SISTEMA', sector: s.name ?? s.code ?? 'Sistema', total: num(s.total) })),
     };
   }
 }

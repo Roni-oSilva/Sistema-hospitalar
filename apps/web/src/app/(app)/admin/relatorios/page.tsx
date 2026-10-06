@@ -17,7 +17,7 @@ interface Overview {
   ageBands: { band: string; total: number }[];
   accessibility: { flag: AccessibilityFlag; total: number | string }[];
   productivity: { doctors: { name: string; finished: number; avgMinutes: number | null }[]; triage: { name: string; finished: number }[] };
-  eventsBySector: { sector: string; total: number }[];
+  eventsBySector: { code: string; sector: string; total: number }[];
 }
 
 const m = fmtAvgMinutes;

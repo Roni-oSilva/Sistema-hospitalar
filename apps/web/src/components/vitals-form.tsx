@@ -70,9 +70,10 @@ function Num({ id, label, unit, value, onChange, error, disabled, decimal, width
 export function VitalsForm({ value, onChange, errors = {}, disabled }: { value: VitalsDraft; onChange: (v: VitalsDraft) => void; errors?: Record<string, string>; disabled?: boolean }) {
   const set = (k: keyof VitalsDraft) => (v: string) => onChange({ ...value, [k]: v });
   return (
-    <div className="flex flex-col gap-5">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <fieldset className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
+    // colunas pela largura do cartão (container query), não da janela: o formulário vive numa coluna estreita
+    <div className="@container flex flex-col gap-5">
+      <div className="grid grid-cols-2 gap-4 @xl:grid-cols-3 @4xl:grid-cols-4">
+        <fieldset className="col-span-2 flex flex-col gap-1 @xl:col-span-1">
           <legend className="mb-1 text-sm font-semibold text-ink-2">Pressão arterial (mmHg)</legend>
           <div className="flex items-center gap-2">
             <Input aria-label="Pressão sistólica" placeholder="120" inputMode="numeric" className="tabular font-mono text-lg" value={value.systolic} disabled={disabled} invalid={Boolean(errors.systolic)} onChange={(e) => set('systolic')(e.target.value.replace(/\D/g, ''))} />
