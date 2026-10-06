@@ -1,0 +1,32 @@
+{
+  "name": "hospital-ulianopolis",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema digital de atendimento — Hospital Municipal de Ulianópolis (recepção → triagem → fila médica → consultório → conduta)",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @hospital/shared",
+    "build": "npm run build:shared && npm run build -w @hospital/api && npm run build -w @hospital/web",
+    "dev": "npm run build:shared && concurrently -n shared,api,web -c gray,blue,green \"npm run dev -w @hospital/shared\" \"npm run dev -w @hospital/api\" \"npm run dev -w @hospital/web\"",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d db",
+    "db:migrate": "npm run prisma:migrate -w @hospital/api",
+    "db:deploy": "npm run prisma:deploy -w @hospital/api",
+    "db:seed": "npm run prisma:seed -w @hospital/api",
+    "db:reset": "npm run prisma:reset -w @hospital/api",
+    "test": "npm run build:shared && npm run test -w @hospital/shared && npm run test -w @hospital/api",
+    "test:api": "npm run build:shared && npm run test -w @hospital/api",
+    "test:e2e": "npm run test:e2e -w @hospital/e2e",
+    "lint": "npm run lint -w @hospital/api && npm run lint -w @hospital/web",
+    "typecheck": "npm run build:shared && npm run typecheck -w @hospital/api && npm run typecheck -w @hospital/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

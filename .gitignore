@@ -1,0 +1,34 @@
+# dependências e builds
+node_modules/
+dist/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# segredos e ambientes locais — NUNCA versionar
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# dados — nunca versionar dumps, backups ou exportações
+backups/
+*.dump
+*.sql.gz
+*.bak
+uploads/
+
+# logs, capturas e artefatos de teste (podem conter dados de saúde)
+logs/
+*.log
+screenshots/
+playwright-report/
+test-results/
+
+# sistema / editor
+.DS_Store
+.idea/
+.vscode/

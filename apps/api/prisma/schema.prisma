@@ -1,0 +1,951 @@
+// Hospital Municipal de Ulianópolis — modelo de dados.
+//
+// Convenções:
+//  - tabelas e colunas em snake_case (consulta SQL direta por DBAs/relatórios); modelos em PascalCase;
+//  - chaves primárias UUID (gen_random_uuid()), exceto logs append-only (BigInt identity, ordenação natural);
+//  - NUNCA CPF/CNS como chave: são colunas UNIQUE comuns;
+//  - timestamps em UTC (timestamptz); "dia do hospital" é calculado no fuso America/Belem pela aplicação;
+//  - registros clínicos nunca são apagados (FKs com Restrict) — correções geram versões em clinical_record_versions;
+//  - regras que o Prisma não expressa (índices parciais, CHECKs, triggers append-only) estão no SQL da migration
+//    `*_integridade_e_imutabilidade` e documentadas em docs/DATABASE.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── ENUMS ───────────────────────────────
+
+enum AttendanceStatus {
+  AGUARDANDO_TRIAGEM
+  EM_TRIAGEM
+  AGUARDANDO_MEDICO
+  EM_ATENDIMENTO
+  MEDICACAO_REGISTRADA
+  ATENDIMENTO_FINALIZADO
+  CANCELADO
+
+  @@map("attendance_status")
+}
+
+enum AttendanceKind {
+  ATENDIMENTO
+  RETORNO
+
+  @@map("attendance_kind")
+}
+
+enum RiskLevel {
+  EMERGENCIA
+  MUITO_URGENTE
+  URGENTE
+  POUCO_URGENTE
+  NAO_URGENTE
+
+  @@map("risk_level")
+}
+
+enum QueueKind {
+  TRIAGEM
+  MEDICA
+
+  @@map("queue_kind")
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  IN_SERVICE
+  DONE
+  CANCELLED
+
+  @@map("queue_status")
+}
+
+enum Sex {
+  MASCULINO
+  FEMININO
+  INTERSEXO
+  NAO_INFORMADO
+
+  @@map("sex")
+}
+
+enum PhoneType {
+  TELEFONE
+  CELULAR
+
+  @@map("phone_type")
+}
+
+enum DisabilityType {
+  FISICA
+  AUDITIVA
+  VISUAL
+  INTELECTUAL
+  PSICOSSOCIAL
+  MULTIPLA
+  NAO_INFORMADO
+
+  @@map("disability_type")
+}
+
+enum AccessibilityFlag {
+  PCD
+  IDOSO
+  GESTANTE
+  CRIANCA
+  MOBILIDADE_REDUZIDA
+  NECESSITA_ACOMPANHANTE
+  NECESSITA_INTERPRETE
+  NECESSITA_LIBRAS
+  NECESSITA_AUXILIO_VISUAL
+  NECESSITA_AUXILIO_COMUNICACAO
+  OUTRA
+
+  @@map("accessibility_flag")
+}
+
+enum AccessibilityNeed {
+  CADEIRA_DE_RODAS
+  MULETAS
+  ANDADOR
+  BENGALA
+  AUXILIO_LOCOMOCAO
+  INTERPRETE_LIBRAS
+  AUXILIO_COMUNICACAO
+  ACOMPANHANTE
+  AUXILIO_VISUAL
+  OUTRA
+
+  @@map("accessibility_need")
+}
+
+enum Outcome {
+  MEDICADO
+  ALTA
+  RETORNO
+  ENCAMINHAMENTO
+  OUTRO
+
+  @@map("outcome")
+}
+
+enum TriageStatus {
+  IN_PROGRESS
+  FINISHED
+
+  @@map("triage_status")
+}
+
+enum ConsultationStatus {
+  IN_PROGRESS
+  FINISHED
+
+  @@map("consultation_status")
+}
+
+enum MedicalNoteType {
+  COMPLEMENTO
+  CORRECAO
+
+  @@map("medical_note_type")
+}
+
+enum TimelineEventType {
+  ENTRADA
+  TRIAGEM_INICIADA
+  TRIAGEM_DEVOLVIDA
+  TRIAGEM_FINALIZADA
+  CLASSIFICACAO_ALTERADA
+  ACESSIBILIDADE_ATUALIZADA
+  CHAMADO
+  RECHAMADO
+  DEVOLVIDO_A_FILA
+  ATENDIMENTO_INICIADO
+  DIAGNOSTICO_REGISTRADO
+  MEDICACAO_REGISTRADA
+  REGISTRO_CORRIGIDO
+  COMPLEMENTO_REGISTRADO
+  ATENDIMENTO_FINALIZADO
+  ATENDIMENTO_CANCELADO
+
+  @@map("timeline_event_type")
+}
+
+enum TimelineCategory {
+  GENERAL
+  CLINICAL
+
+  @@map("timeline_category")
+}
+
+enum ClinicalRecordType {
+  TRIAGEM
+  CONSULTA
+
+  @@map("clinical_record_type")
+}
+
+enum AccessEvent {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGIN_BLOCKED
+  LOGOUT
+  SESSION_EXPIRED
+  PASSWORD_CHANGED
+  PASSWORD_RESET
+
+  @@map("access_event")
+}
+
+// ─────────────────────── ACESSO: usuários, perfis, sessões ───────────────────────
+
+model Sector {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  users User[]
+  rooms Room[]
+
+  @@map("sectors")
+}
+
+/// Consultório. Escolhido por quem chama o paciente (a fila médica é única).
+model Room {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String   @unique
+  sectorId  String   @map("sector_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sector     Sector       @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  queueCalls QueueCall[]
+  queue      QueueEntry[]
+
+  @@map("rooms")
+}
+
+model User {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username             String    @unique
+  fullName             String    @map("full_name")
+  email                String?   @unique
+  /// CRM / COREN etc. (exibido nas prescrições e registros)
+  professionalRegister String?   @map("professional_register")
+  /// argon2id — nunca retornado pela API
+  passwordHash         String    @map("password_hash")
+  isActive             Boolean   @default(true) @map("is_active")
+  mustChangePassword   Boolean   @default(false) @map("must_change_password")
+  failedLoginAttempts  Int       @default(0) @map("failed_login_attempts")
+  lockedUntil          DateTime? @map("locked_until") @db.Timestamptz(3)
+  lastLoginAt          DateTime? @map("last_login_at") @db.Timestamptz(3)
+  passwordChangedAt    DateTime? @map("password_changed_at") @db.Timestamptz(3)
+  /// Notificações com created_at > este instante contam como não lidas
+  notificationsReadAt  DateTime? @map("notifications_read_at") @db.Timestamptz(3)
+  sectorId             String?   @map("sector_id") @db.Uuid
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sector   Sector?    @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  roles    UserRole[]
+  sessions Session[]
+
+  patientsCreated      Patient[]                 @relation("PatientCreatedBy")
+  patientsUpdated      Patient[]                 @relation("PatientUpdatedBy")
+  attendancesCreated   Attendance[]              @relation("AttendanceCreatedBy")
+  statusChanges        AttendanceStatusHistory[]
+  events               AttendanceEvent[]
+  triagesStarted       Triage[]                  @relation("TriageStartedBy")
+  triagesFinished      Triage[]                  @relation("TriageFinishedBy")
+  vitalsRecorded       TriageVital[]
+  classifications      RiskClassification[]
+  queueAssigned        QueueEntry[]
+  calls                QueueCall[]
+  consultations        MedicalConsultation[]
+  notes                MedicalNote[]
+  diagnosesCreated     Diagnosis[]               @relation("DiagnosisCreatedBy")
+  diagnosesRemoved     Diagnosis[]               @relation("DiagnosisRemovedBy")
+  prescriptionsCreated Prescription[]
+  itemsCreated         PrescriptionItem[]        @relation("ItemCreatedBy")
+  itemsCanceled        PrescriptionItem[]        @relation("ItemCanceledBy")
+  recordVersions       ClinicalRecordVersion[]
+  settingsUpdated      SystemSetting[]
+  auditLogs            AuditLog[]
+  accessLogs           AccessLog[]
+  accessibilityUpdates PatientAccessibility[]
+  attendanceAccessUpd  AttendanceAccessibility[]
+
+  @@index([isActive])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String   @unique
+  name        String
+  description String?
+  /// Perfis de sistema não podem ser excluídos
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String @unique
+  module      String
+  description String
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+/// Sessão opaca no servidor: o cookie leva um token aleatório; aqui só fica o SHA-256 dele.
+model Session {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  tokenHash      String    @unique @map("token_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastActivityAt DateTime  @default(now()) @map("last_activity_at") @db.Timestamptz(3)
+  /// Expiração absoluta
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedReason  String?   @map("revoked_reason")
+  ip             String?
+  userAgent      String?   @map("user_agent")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ─────────────────────────────── CONFIGURAÇÃO ───────────────────────────────
+
+model SystemSetting {
+  key         String   @id
+  value       Json
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@map("system_settings")
+}
+
+/// Contadores atômicos (INSERT … ON CONFLICT DO UPDATE … RETURNING): ATD por ano, senha por dia.
+model SequenceCounter {
+  key   String @id
+  value Int
+
+  @@map("sequence_counters")
+}
+
+// ─────────────────────────────── PACIENTES ───────────────────────────────
+
+model Patient {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Número do prontuário (sequencial, imutável)
+  recordNumber   Int      @unique @default(autoincrement()) @map("record_number")
+  fullName       String   @map("full_name")
+  socialName     String?  @map("social_name")
+  /// minúsculas e sem acentos: busca e detecção de duplicidade
+  normalizedName String   @map("normalized_name")
+  /// só dígitos (11) — UNIQUE quando informado
+  cpf            String?  @unique
+  /// só dígitos (15) — UNIQUE quando informado
+  cns            String?  @unique
+  rg             String?
+  birthDate      DateTime @map("birth_date") @db.Date
+  sex            Sex
+  nationality    String   @default("Brasileira")
+  birthplace     String?
+  motherName     String?  @map("mother_name")
+  /// controle de concorrência otimista
+  version        Int      @default(1)
+  createdById    String   @map("created_by_id") @db.Uuid
+  updatedById    String?  @map("updated_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdBy     User                  @relation("PatientCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy     User?                 @relation("PatientUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  contacts      PatientContact[]
+  addresses     PatientAddress[]
+  guardian      PatientGuardian?
+  accessibility PatientAccessibility?
+  attendances   Attendance[]
+  auditLogs     AuditLog[]
+
+  @@index([normalizedName(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patients_normalized_name_trgm")
+  @@index([birthDate])
+  @@index([normalizedName, birthDate])
+  @@map("patients")
+}
+
+model PatientContact {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId String    @map("patient_id") @db.Uuid
+  type      PhoneType
+  /// só dígitos (DDD + número)
+  number    String
+  isPrimary Boolean   @default(false) @map("is_primary")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@index([number])
+  @@map("patient_contacts")
+}
+
+/// Histórico de endereços; só um é o atual (índice parcial único na migration).
+model PatientAddress {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId    String   @map("patient_id") @db.Uuid
+  street       String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?  @db.Char(2)
+  zipCode      String?  @map("zip_code")
+  isCurrent    Boolean  @default(true) @map("is_current")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@map("patient_addresses")
+}
+
+/// Responsável / acompanhante (quando necessário)
+model PatientGuardian {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId    String   @unique @map("patient_id") @db.Uuid
+  name         String
+  cpf          String?
+  relationship String
+  phone        String?
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+
+  @@map("patient_guardians")
+}
+
+/// Perfil permanente de acessibilidade do paciente. Não influencia a classificação clínica.
+model PatientAccessibility {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  patientId            String              @unique @map("patient_id") @db.Uuid
+  flags                AccessibilityFlag[]
+  disabilityType       DisabilityType?     @map("disability_type")
+  needs                AccessibilityNeed[]
+  otherNeedDescription String?             @map("other_need_description")
+  updatedById          String?             @map("updated_by_id") @db.Uuid
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  updatedBy User?   @relation(fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@map("patient_accessibility")
+}
+
+// ─────────────────────────────── ATENDIMENTO ───────────────────────────────
+
+model Attendance {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// ATD-AAAA-NNNNNN
+  code         String           @unique
+  year         Int
+  sequence     Int
+  /// Senha do dia (exibida no painel público)
+  ticketDate   DateTime         @map("ticket_date") @db.Date
+  ticketNumber Int              @map("ticket_number")
+  patientId    String           @map("patient_id") @db.Uuid
+  kind         AttendanceKind   @default(ATENDIMENTO)
+  /// Motivo da procura (recepção)
+  reason       String?
+  status       AttendanceStatus @default(AGUARDANDO_TRIAGEM)
+
+  /// Desnormalizado a partir de risk_classifications (última) para ordenar/filtrar sem join
+  currentRiskLevel RiskLevel? @map("current_risk_level")
+  riskClassifiedAt DateTime?  @map("risk_classified_at") @db.Timestamptz(3)
+
+  arrivedAt              DateTime  @default(now()) @map("arrived_at") @db.Timestamptz(3)
+  triageStartedAt        DateTime? @map("triage_started_at") @db.Timestamptz(3)
+  triageFinishedAt       DateTime? @map("triage_finished_at") @db.Timestamptz(3)
+  firstCalledAt          DateTime? @map("first_called_at") @db.Timestamptz(3)
+  consultationStartedAt  DateTime? @map("consultation_started_at") @db.Timestamptz(3)
+  medicationRegisteredAt DateTime? @map("medication_registered_at") @db.Timestamptz(3)
+  finishedAt             DateTime? @map("finished_at") @db.Timestamptz(3)
+  cancelledAt            DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason           String?   @map("cancel_reason")
+
+  createdById       String  @map("created_by_id") @db.Uuid
+  createdSectorCode String? @map("created_sector_code")
+  clientIp          String? @map("client_ip")
+  userAgent         String? @map("user_agent")
+  deviceLabel       String? @map("device_label")
+
+  /// controle de concorrência otimista
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  patient         Patient                   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  createdBy       User                      @relation("AttendanceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  accessibility   AttendanceAccessibility?
+  statusHistory   AttendanceStatusHistory[]
+  events          AttendanceEvent[]
+  triage          Triage?
+  vitals          TriageVital[]
+  classifications RiskClassification[]
+  queueEntries    QueueEntry[]
+  queueCalls      QueueCall[]
+  consultation    MedicalConsultation?
+  auditLogs       AuditLog[]
+  recordVersions  ClinicalRecordVersion[]
+  diagnoses       Diagnosis[]
+  prescriptions   Prescription[]
+  notes           MedicalNote[]
+
+  @@unique([year, sequence])
+  @@unique([ticketDate, ticketNumber])
+  @@index([status, arrivedAt])
+  @@index([patientId, arrivedAt])
+  @@index([arrivedAt])
+  @@index([finishedAt])
+  @@map("attendances")
+}
+
+/// Acessibilidade vigente NESTA visita (copiada do cadastro; a triagem pode ajustar, ex.: gestante).
+model AttendanceAccessibility {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId         String              @unique @map("attendance_id") @db.Uuid
+  flags                AccessibilityFlag[]
+  disabilityType       DisabilityType?     @map("disability_type")
+  needs                AccessibilityNeed[]
+  otherNeedDescription String?             @map("other_need_description")
+  updatedById          String?             @map("updated_by_id") @db.Uuid
+  updatedAt            DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  updatedBy  User?      @relation(fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@map("attendance_accessibility")
+}
+
+/// Histórico de transições de estado — append-only (trigger).
+model AttendanceStatusHistory {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId String            @map("attendance_id") @db.Uuid
+  fromStatus   AttendanceStatus? @map("from_status")
+  toStatus     AttendanceStatus  @map("to_status")
+  changedById  String            @map("changed_by_id") @db.Uuid
+  sectorCode   String?           @map("sector_code")
+  reason       String?
+  ip           String?
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  changedBy  User       @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([attendanceId, createdAt])
+  @@map("attendance_status_history")
+}
+
+/// Linha do tempo — append-only (trigger). `detail` só é exposto a quem tem permissão clínica.
+model AttendanceEvent {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId String            @map("attendance_id") @db.Uuid
+  type         TimelineEventType
+  category     TimelineCategory  @default(GENERAL)
+  actorId      String?           @map("actor_id") @db.Uuid
+  sectorCode   String?           @map("sector_code")
+  detail       Json?
+  occurredAt   DateTime          @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  actor      User?      @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([attendanceId, occurredAt])
+  @@map("attendance_events")
+}
+
+// ─────────────────────────────── TRIAGEM ───────────────────────────────
+
+model Triage {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId     String       @unique @map("attendance_id") @db.Uuid
+  status           TriageStatus @default(IN_PROGRESS)
+  startedById      String       @map("started_by_id") @db.Uuid
+  startedAt        DateTime     @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedById     String?      @map("finished_by_id") @db.Uuid
+  finishedAt       DateTime?    @map("finished_at") @db.Timestamptz(3)
+  chiefComplaint   String?      @map("chief_complaint")
+  symptoms         String?
+  symptomOnset     String?      @map("symptom_onset")
+  allergies        String?
+  medicationsInUse String?      @map("medications_in_use")
+  notes            String?
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  attendance      Attendance           @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  startedBy       User                 @relation("TriageStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
+  finishedBy      User?                @relation("TriageFinishedBy", fields: [finishedById], references: [id], onDelete: Restrict)
+  vitals          TriageVital[]
+  classifications RiskClassification[]
+
+  @@map("triage")
+}
+
+/// Série de aferições (append-only). Reaferir/corrigir = nova linha; a mais recente é a vigente.
+model TriageVital {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  triageId        String   @map("triage_id") @db.Uuid
+  attendanceId    String   @map("attendance_id") @db.Uuid
+  measuredAt      DateTime @default(now()) @map("measured_at") @db.Timestamptz(3)
+  recordedById    String   @map("recorded_by_id") @db.Uuid
+  systolic        Int?
+  diastolic       Int?
+  heartRate       Int?     @map("heart_rate")
+  respiratoryRate Int?     @map("respiratory_rate")
+  spo2            Int?
+  temperatureC    Decimal? @map("temperature_c") @db.Decimal(4, 1)
+  glucose         Int?
+  weightKg        Decimal? @map("weight_kg") @db.Decimal(5, 1)
+  heightCm        Decimal? @map("height_cm") @db.Decimal(4, 1)
+  painScale       Int?     @map("pain_scale")
+
+  triage     Triage     @relation(fields: [triageId], references: [id], onDelete: Restrict)
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  recordedBy User       @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([attendanceId, measuredAt])
+  @@index([triageId])
+  @@map("triage_vitals")
+}
+
+/// Classificação de risco feita por profissional — append-only. A vigente é a mais recente.
+model RiskClassification {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId   String     @map("attendance_id") @db.Uuid
+  triageId       String     @map("triage_id") @db.Uuid
+  level          RiskLevel
+  previousLevel  RiskLevel? @map("previous_level")
+  /// Protocolo configurado no momento (snapshot)
+  protocol       String?
+  observation    String?
+  /// Motivo (obrigatório em reclassificação)
+  reason         String?
+  classifiedById String     @map("classified_by_id") @db.Uuid
+  classifiedAt   DateTime   @default(now()) @map("classified_at") @db.Timestamptz(3)
+
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  triage       Triage     @relation(fields: [triageId], references: [id], onDelete: Restrict)
+  classifiedBy User       @relation(fields: [classifiedById], references: [id], onDelete: Restrict)
+
+  @@index([attendanceId, classifiedAt])
+  @@map("risk_classifications")
+}
+
+// ─────────────────────────────── FILAS E CHAMADAS ───────────────────────────────
+
+/// Uma entrada por (atendimento, fila). O "claim" (iniciar triagem / chamar) é um UPDATE condicional atômico.
+model QueueEntry {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId   String      @map("attendance_id") @db.Uuid
+  kind           QueueKind
+  status         QueueStatus @default(WAITING)
+  /// menor = chamado antes (ver medicalPriorityScore em @hospital/shared)
+  priorityScore  Int         @default(0) @map("priority_score")
+  enqueuedAt     DateTime    @default(now()) @map("enqueued_at") @db.Timestamptz(3)
+  assignedUserId String?     @map("assigned_user_id") @db.Uuid
+  roomId         String?     @map("room_id") @db.Uuid
+  calledAt       DateTime?   @map("called_at") @db.Timestamptz(3)
+  startedAt      DateTime?   @map("started_at") @db.Timestamptz(3)
+  finishedAt     DateTime?   @map("finished_at") @db.Timestamptz(3)
+  callCount      Int         @default(0) @map("call_count")
+  version        Int         @default(1)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  attendance   Attendance  @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  assignedUser User?       @relation(fields: [assignedUserId], references: [id], onDelete: Restrict)
+  room         Room?       @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  calls        QueueCall[]
+
+  @@unique([attendanceId, kind])
+  @@index([kind, status, priorityScore, enqueuedAt])
+  @@map("queue")
+}
+
+/// Cada chamada (inclui re-chamadas) — append-only. Alimenta o painel público.
+model QueueCall {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  queueEntryId String   @map("queue_entry_id") @db.Uuid
+  attendanceId String   @map("attendance_id") @db.Uuid
+  roomId       String   @map("room_id") @db.Uuid
+  calledById   String   @map("called_by_id") @db.Uuid
+  callNumber   Int      @map("call_number")
+  isRecall     Boolean  @default(false) @map("is_recall")
+  /// o paciente chamado não era o primeiro da fila no momento (rastreabilidade)
+  outOfOrder   Boolean  @default(false) @map("out_of_order")
+  calledAt     DateTime @default(now()) @map("called_at") @db.Timestamptz(3)
+
+  queueEntry QueueEntry @relation(fields: [queueEntryId], references: [id], onDelete: Restrict)
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  room       Room       @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  calledBy   User       @relation(fields: [calledById], references: [id], onDelete: Restrict)
+
+  @@index([calledAt(sort: Desc)])
+  @@index([attendanceId])
+  @@map("queue_calls")
+}
+
+// ─────────────────────────────── ATENDIMENTO MÉDICO ───────────────────────────────
+
+model MedicalConsultation {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId   String             @unique @map("attendance_id") @db.Uuid
+  doctorId       String             @map("doctor_id") @db.Uuid
+  status         ConsultationStatus @default(IN_PROGRESS)
+  startedAt      DateTime           @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt     DateTime?          @map("finished_at") @db.Timestamptz(3)
+  chiefComplaint String?            @map("chief_complaint")
+  /// História / evolução
+  history        String?
+  /// Exame / avaliação
+  examination    String?
+  conduct        String?
+  outcome        Outcome?
+  finalNotes     String?            @map("final_notes")
+  version        Int                @default(1)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  attendance   Attendance    @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  doctor       User          @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  notes        MedicalNote[]
+  diagnoses    Diagnosis[]
+  prescription Prescription?
+
+  @@index([doctorId, startedAt])
+  @@map("medical_consultations")
+}
+
+/// Complementos/correções textuais após a finalização — append-only.
+model MedicalNote {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId String          @map("consultation_id") @db.Uuid
+  attendanceId   String          @map("attendance_id") @db.Uuid
+  type           MedicalNoteType
+  content        String
+  authorId       String          @map("author_id") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  consultation MedicalConsultation @relation(fields: [consultationId], references: [id], onDelete: Restrict)
+  attendance   Attendance          @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  author       User                @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([consultationId, createdAt])
+  @@map("medical_notes")
+}
+
+/// Diagnósticos (CID-10 opcional). Remoção lógica com motivo — nunca DELETE.
+model Diagnosis {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId String    @map("consultation_id") @db.Uuid
+  attendanceId   String    @map("attendance_id") @db.Uuid
+  code           String?
+  description    String
+  isPrimary      Boolean   @default(false) @map("is_primary")
+  createdById    String    @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  removedAt      DateTime? @map("removed_at") @db.Timestamptz(3)
+  removedById    String?   @map("removed_by_id") @db.Uuid
+  removalReason  String?   @map("removal_reason")
+
+  consultation MedicalConsultation @relation(fields: [consultationId], references: [id], onDelete: Restrict)
+  attendance   Attendance          @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  createdBy    User                @relation("DiagnosisCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  removedBy    User?               @relation("DiagnosisRemovedBy", fields: [removedById], references: [id], onDelete: Restrict)
+
+  @@index([consultationId])
+  @@map("diagnoses")
+}
+
+model Prescription {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId String   @unique @map("consultation_id") @db.Uuid
+  attendanceId   String   @map("attendance_id") @db.Uuid
+  prescribedById String   @map("prescribed_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  consultation MedicalConsultation @relation(fields: [consultationId], references: [id], onDelete: Restrict)
+  attendance   Attendance          @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  prescribedBy User                @relation(fields: [prescribedById], references: [id], onDelete: Restrict)
+  items        PrescriptionItem[]
+
+  @@map("prescriptions")
+}
+
+/// Itens da prescrição. O médico é o único autor; cancelamento lógico com motivo.
+model PrescriptionItem {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  prescriptionId String    @map("prescription_id") @db.Uuid
+  position       Int
+  medication     String
+  dose           String
+  route          String
+  frequency      String
+  duration       String
+  notes          String?
+  createdById    String    @map("created_by_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  canceledAt     DateTime? @map("canceled_at") @db.Timestamptz(3)
+  canceledById   String?   @map("canceled_by_id") @db.Uuid
+  cancelReason   String?   @map("cancel_reason")
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation("ItemCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  canceledBy   User?        @relation("ItemCanceledBy", fields: [canceledById], references: [id], onDelete: Restrict)
+
+  @@index([prescriptionId, position])
+  @@map("prescription_items")
+}
+
+/// VERSÃO ANTERIOR → CORREÇÃO → NOVO REGISTRO: antes de cada UPDATE de triagem/consulta, o estado anterior vai para cá.
+model ClinicalRecordVersion {
+  id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attendanceId String             @map("attendance_id") @db.Uuid
+  recordType   ClinicalRecordType @map("record_type")
+  recordId     String             @map("record_id") @db.Uuid
+  /// número da versão que este snapshot representa
+  version      Int
+  snapshot     Json
+  changedById  String             @map("changed_by_id") @db.Uuid
+  changeReason String?            @map("change_reason")
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  attendance Attendance @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+  changedBy  User       @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@unique([recordType, recordId, version])
+  @@index([attendanceId])
+  @@map("clinical_record_versions")
+}
+
+// ─────────────────────────────── NOTIFICAÇÕES ───────────────────────────────
+
+/// Avisos internos SEM dados clínicos nem identificação do paciente.
+model Notification {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type           String
+  title          String
+  message        String
+  /// perfil destinatário (código do role); null = todos os autenticados
+  targetRole     String?  @map("target_role")
+  attendanceCode String?  @map("attendance_code")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([targetRole, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// ─────────────────────────────── AUDITORIA ───────────────────────────────
+
+/// Trilha de auditoria — append-only (trigger). Não grava conteúdo clínico: apenas nomes de campos alterados.
+model AuditLog {
+  id             BigInt   @id @default(autoincrement())
+  userId         String?  @map("user_id") @db.Uuid
+  username       String?
+  sectorCode     String?  @map("sector_code")
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String?  @map("entity_id")
+  patientId      String?  @map("patient_id") @db.Uuid
+  attendanceId   String?  @map("attendance_id") @db.Uuid
+  attendanceCode String?  @map("attendance_code")
+  changes        Json?
+  metadata       Json?
+  ip             String?
+  userAgent      String?  @map("user_agent")
+  requestId      String?  @map("request_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  patient    Patient?    @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([patientId, createdAt(sort: Desc)])
+  @@index([attendanceId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+/// Logins, falhas, bloqueios, expirações — append-only (trigger).
+model AccessLog {
+  id                BigInt      @id @default(autoincrement())
+  userId            String?     @map("user_id") @db.Uuid
+  usernameAttempted String?     @map("username_attempted")
+  event             AccessEvent
+  success           Boolean
+  reason            String?
+  ip                String?
+  userAgent         String?     @map("user_agent")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([ip, createdAt(sort: Desc)])
+  @@map("access_logs")
+}
