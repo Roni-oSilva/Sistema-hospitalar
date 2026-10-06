@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: hospital_test
+          POSTGRES_USER: postgres
+          # banco efêmero do runner, acessível só dentro do job: sem senha (nenhum segredo versionado)
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres@localhost:5432/hospital_test?schema=public
+      APP_ENV: test
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pacote compartilhado (build + testes)
+        run: npm run build:shared && npm test -w @hospital/shared
+      - name: API — lint e tipos
+        run: npm run lint -w @hospital/api && npm run typecheck -w @hospital/api
+      - name: API — testes (PostgreSQL real)
+        run: npm test -w @hospital/api
+      - name: Web — lint e build de produção
+        run: npm run lint -w @hospital/web && npm run build -w @hospital/web

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, ClipboardList, Hand, UserCheck } from 'lucide-react';
 import { CLAIM_STALE_MINUTES } from '@hospital/shared';
@@ -40,7 +40,7 @@ export default function TriageQueuePage() {
     },
   });
 
-  const waiting = q.data?.waiting ?? [];
+  const waiting = useMemo(() => q.data?.waiting ?? [], [q.data]);
   const mine = (q.data?.inProgress ?? []).filter((i) => i.assignedTo?.isMe);
   const others = (q.data?.inProgress ?? []).filter((i) => !i.assignedTo?.isMe);
 

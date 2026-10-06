@@ -5,12 +5,6 @@ import { z } from 'zod';
  * NENHUM segredo vive no código: senha do banco, chaves e afins só entram por ambiente (ver docs/ENVIRONMENT.md).
  */
 
-const bool = (def: boolean) =>
-  z
-    .enum(['true', 'false', '1', '0'])
-    .optional()
-    .transform((v) => (v === undefined ? def : v === 'true' || v === '1'));
-
 const envSchema = z.object({
   APP_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),

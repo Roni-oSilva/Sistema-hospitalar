@@ -32,3 +32,8 @@ test-results/
 .DS_Store
 .idea/
 .vscode/
+
+# implantação: segredos, certificados e variáveis reais ficam fora do git
+deploy/env/*.env
+deploy/secrets/
+deploy/nginx/certs/

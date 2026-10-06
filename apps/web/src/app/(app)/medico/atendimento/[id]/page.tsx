@@ -28,8 +28,7 @@ import { AccessibilityBadges, RiskBadge, RiskPicker, StatusBadge, Timeline, Vita
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
-const TEXT = ['chiefComplaint', 'history', 'examination', 'conduct'] as const;
-type Texts = Record<(typeof TEXT)[number], string>;
+type Texts = Record<'chiefComplaint' | 'history' | 'examination' | 'conduct', string>;
 const emptyItem = { medication: '', dose: '', route: '', frequency: '', duration: '', notes: '' };
 
 export default function ConsultationPage({ params }: { params: Promise<{ id: string }> }) {
@@ -139,7 +138,6 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
 
   const p = d.permissions;
   const activeItems = d.prescriptionItems.filter((i) => !i.canceled);
-  const activeDx = d.diagnoses.filter((x) => !x.removed);
   const finished = d.attendance.status === 'ATENDIMENTO_FINALIZADO';
   const setText = (k: keyof Texts) => (v: string) => {
     setTexts((t) => ({ ...(t as Texts), [k]: v }));

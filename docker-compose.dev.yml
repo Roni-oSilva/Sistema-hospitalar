@@ -1,0 +1,21 @@
+# Somente DESENVOLVIMENTO: PostgreSQL local com os bancos de desenvolvimento e de testes.
+#   npm run db:up
+# A senha vem da variável DEV_DB_PASSWORD do seu terminal (nunca versionada):
+#   export DEV_DB_PASSWORD=$(openssl rand -hex 12)
+name: hmu-dev
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hospital
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:?defina DEV_DB_PASSWORD no seu terminal}
+      POSTGRES_DB: hospital_dev
+    ports:
+      - '127.0.0.1:5432:5432' # só na máquina local
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+      - ./deploy/sql/dev-init.sql:/docker-entrypoint-initdb.d/01-dev-init.sql:ro
+
+volumes:
+  pgdata-dev:

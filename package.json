@@ -9,7 +9,8 @@
   },
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "e2e"
   ],
   "scripts": {
     "build:shared": "npm run build -w @hospital/shared",

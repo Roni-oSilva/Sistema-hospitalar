@@ -8,10 +8,10 @@ import { ThrottlerGuard } from '@nestjs/throttler';
  */
 @Injectable()
 export class AppThrottlerGuard extends ThrottlerGuard {
-  protected override async getTracker(req: Record<string, any>): Promise<string> {
+  protected override async getTracker(req: Record<string, unknown>): Promise<string> {
     const cookies = (req.cookies ?? {}) as Record<string, string>;
     const token = cookies['__Host-hosp_session'] ?? cookies['hosp_session'];
     if (token) return `s:${createHash('sha256').update(token).digest('hex').slice(0, 24)}`;
-    return `ip:${req.ip ?? 'unknown'}`;
+    return `ip:${String(req.ip ?? 'unknown')}`;
   }
 }

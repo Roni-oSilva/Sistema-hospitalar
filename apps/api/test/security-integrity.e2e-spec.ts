@@ -4,7 +4,7 @@
 import request from 'supertest';
 import { io, Socket } from 'socket.io-client';
 import { Client, TestContext, bringToMedicalQueue, createAttendance, createPatient, createTestApp, drainMedicalQueue } from './helpers';
-import { TEST_PASSWORD, uniqueName } from './fixtures';
+import { TEST_PASSWORD, randomCpf, uniqueName } from './fixtures';
 
 describe('Segurança e integridade', () => {
   let ctx: TestContext;
@@ -260,6 +260,38 @@ describe('Segurança e integridade', () => {
       expect(disconnected).toBe(true);
       s.close();
     });
+  });
+
+  it('quem pode editar cadastro mas não pode ver documentos não consegue apagá-los (campos chegam mascarados/vazios)', async () => {
+    const admin = await Client.login(ctx, 't.admin');
+    const roles = (await admin.get('/api/admin/roles')).body.roles as { code: string; permissions: string[] }[];
+    const original = roles.find((r) => r.code === 'RECEPCAO')!.permissions;
+    const cpf = randomCpf();
+    const p = await createPatient(reception, { cpf });
+    try {
+      // remove temporariamente a permissão de ver documentos do perfil Recepção
+      const res = await admin.put('/api/admin/roles/RECEPCAO/permissions', { permissions: original.filter((x) => x !== 'patients:view-documents') });
+      expect(res.status).toBe(200);
+      const limited = await Client.login(ctx, 't.recepcao');
+      const view = (await limited.get(`/api/patients/${p.id}`)).body;
+      expect(view.documentsMasked).toBe(true);
+      expect(view.cpf).toBe(`***.***.***-${cpf.slice(9)}`);
+      const upd = await limited.put(`/api/patients/${p.id}`, { fullName: view.fullName, birthDate: view.birthDate, sex: view.sex, cpf: '', expectedVersion: view.version, motherName: 'Atualizada Fictícia' });
+      expect(upd.status).toBe(200);
+      const row = await ctx.prisma.patient.findUniqueOrThrow({ where: { id: p.id } });
+      expect(row.cpf).toBe(cpf); // preservado
+      expect(row.motherName).toBe('Atualizada Fictícia');
+    } finally {
+      await admin.put('/api/admin/roles/RECEPCAO/permissions', { permissions: original });
+      reception = await Client.login(ctx, 't.recepcao');
+    }
+  });
+
+  it('o perfil Administrador não pode perder a gestão de usuários/perfis (evita trancar todos fora)', async () => {
+    const admin = await Client.login(ctx, 't.admin');
+    const r = await admin.put('/api/admin/roles/ADMINISTRADOR/permissions', { permissions: ['audit:read'] });
+    expect(r.status).toBe(422);
+    expect(r.body.code).toBe('ADMIN_LOCKOUT');
   });
 
   it('cadastro de nome sem sobrenome e documentos inválidos retorna erros por campo em português', async () => {

@@ -1,0 +1,12 @@
+{
+  "name": "@hospital/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Teste de ponta a ponta no navegador: o fluxo completo de 16 passos (recepção → triagem → médico → painel)",
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

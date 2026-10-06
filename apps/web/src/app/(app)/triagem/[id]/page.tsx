@@ -14,8 +14,7 @@ import { VitalsForm, emptyVitals, parseVitals, vitalsHasValue, type VitalsDraft 
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
-const TEXT_FIELDS = ['chiefComplaint', 'symptoms', 'symptomOnset', 'allergies', 'medicationsInUse', 'notes'] as const;
-type Texts = Record<(typeof TEXT_FIELDS)[number], string>;
+type Texts = Record<'chiefComplaint' | 'symptoms' | 'symptomOnset' | 'allergies' | 'medicationsInUse' | 'notes', string>;
 
 export default function TriageFormPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

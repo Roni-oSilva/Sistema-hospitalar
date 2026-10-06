@@ -1,0 +1,94 @@
+# Implantação de referência (homologação/produção) em um servidor com Docker.
+# Guia completo: docs/DEPLOY.md. NENHUM segredo neste arquivo: tudo vem de deploy/env/*.env e deploy/secrets/ (fora do git).
+#
+#   cp deploy/env/api.env.example deploy/env/api.env   # e preencha
+#   docker compose up -d --build
+#   docker compose run --rm migrate                    # aplica migrations (usuário DONO do banco)
+#   docker compose run --rm bootstrap                  # dados de referência + 1º administrador
+
+name: hmu-atendimento
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hospital_production}
+      POSTGRES_USER: ${POSTGRES_OWNER:-hospital_owner}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_owner_password
+    secrets: [db_owner_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    # sem "ports": o banco NÃO é exposto fora da rede interna do Docker
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    image: hmu-api:latest
+    restart: unless-stopped
+    env_file: deploy/env/api.env # DATABASE_URL com o usuário de MENOR privilégio (hospital_app)
+    environment:
+      TRUST_PROXY: '1'
+    depends_on:
+      db: { condition: service_healthy }
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [internal]
+
+  # comandos de manutenção (executados sob demanda com "docker compose run --rm ...")
+  migrate:
+    image: hmu-api:latest
+    profiles: [ops]
+    env_file: deploy/env/migrate.env # DATABASE_URL com o usuário DONO (só para migrations)
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+
+  bootstrap:
+    image: hmu-api:latest
+    profiles: [ops]
+    env_file: [deploy/env/api.env, deploy/env/bootstrap.env]
+    command: ['node', 'dist/scripts/bootstrap-admin.js']
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [internal]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_SOCKET_URL: '' # mesma origem (Nginx)
+    image: hmu-web:latest
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp, /app/apps/web/.next/cache]
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/certs:/etc/nginx/certs:ro
+    depends_on: [api, web]
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  pgdata:
+
+secrets:
+  db_owner_password:
+    file: ./deploy/secrets/db_owner_password.txt

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
@@ -24,6 +25,8 @@ const csp = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // monorepo: rastreia dependências a partir da raiz (inclui packages/shared no build standalone)
+  outputFileTracingRoot: path.join(__dirname, '../../'),
   reactStrictMode: true,
   poweredByHeader: false,
   async rewrites() {
