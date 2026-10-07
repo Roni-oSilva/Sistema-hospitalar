@@ -11,10 +11,22 @@ import type { TriageView } from '@/lib/types';
 import { AccessibilityBadges, AccessibilityDetails, RiskBadge, RiskPicker, StatusBadge, VitalsGrid } from '@/components/clinical';
 import { AccessibilityEditor, fromAccessibility, toAccessibilityInput, type AccessibilityValue } from '@/components/accessibility-editor';
 import { VitalsForm, emptyVitals, parseVitals, vitalsHasValue, type VitalsDraft } from '@/components/vitals-form';
-import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea } from '@/components/ui';
+import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, LoadError, Spinner, Textarea } from '@/components/ui';
 import { useToast } from '@/components/toast';
+import { DraftRestoredNotice, StaleDataNotice } from '@/components/draft-notice';
+import { clearDraft, draftKey, takeDraft, useDraftPersistence, useUnsavedChangesWarning } from '@/lib/drafts';
 
 type Texts = Record<'chiefComplaint' | 'symptoms' | 'symptomOnset' | 'allergies' | 'medicationsInUse' | 'notes', string>;
+/** O que fica guardado no rascunho local enquanto não é salvo. */
+interface TriageDraft {
+  texts: Texts;
+  dirty: boolean;
+  vitals: VitalsDraft;
+  level: RiskLevel | null;
+  observation: string;
+  reason: string;
+  correctionReason: string;
+}
 
 export default function TriageFormPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -37,11 +49,27 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
   const [editAcc, setEditAcc] = useState(false);
   const [acc, setAcc] = useState<AccessibilityValue | null>(null);
   const [accProfile, setAccProfile] = useState(false);
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const dKey = draftKey('triagem', id);
+  const base = data?.triage?.version ?? 0;
 
   // inicializa o formulário uma vez com o que já foi registrado (ninguém digita de novo)
   useEffect(() => {
     if (!data || texts) return;
     const t = data.triage;
+    // a rede caiu / a tela recarregou antes de salvar? recupera o que tinha sido digitado
+    const draft = takeDraft<TriageDraft>(draftKey('triagem', id), t?.version ?? 0);
+    if (draft) {
+      setTexts(draft.value.texts);
+      setDirty(draft.value.dirty);
+      setVitals(draft.value.vitals);
+      setLevel(draft.value.level);
+      setObservation(draft.value.observation);
+      setReason(draft.value.reason);
+      setCorrectionReason(draft.value.correctionReason);
+      setRestoredAt(draft.savedAt);
+      return;
+    }
     setTexts({
       chiefComplaint: t?.chiefComplaint ?? data.suggestedChiefComplaint ?? '',
       symptoms: t?.symptoms ?? '',
@@ -52,13 +80,20 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
     });
     setDirty(!t?.chiefComplaint && Boolean(data.suggestedChiefComplaint));
     setLevel(data.currentRiskLevel);
-  }, [data, texts]);
+  }, [data, texts, id]);
 
   const perms = data?.permissions;
   const editable = Boolean(perms?.canEdit);
   const correcting = Boolean(perms?.canCorrect) && !editable;
   const textEditable = editable || correcting;
   const isReclass = Boolean(data && data.currentRiskLevel && data.attendance.status !== 'EM_TRIAGEM');
+
+  // tudo que ainda não chegou ao servidor fica num rascunho local até ser salvo
+  const pending =
+    Boolean(texts) &&
+    (dirty || vitalsHasValue(vitals) || (level !== null && level !== data?.currentRiskLevel) || observation.trim() !== '' || reason.trim() !== '' || correctionReason.trim() !== '');
+  useDraftPersistence<TriageDraft | null>(dKey, texts ? { texts, dirty, vitals, level, observation, reason, correctionReason } : null, pending, base, Boolean(texts));
+  useUnsavedChangesWarning(pending && textEditable);
 
   const refresh = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: ['attendance', id] });
@@ -158,6 +193,7 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
       async () => {
         try {
           await post(`/triage/${id}/finish`, {});
+          clearDraft(dKey);
           toast.show('ok', 'Triagem finalizada', `${data?.patient.displayName} entrou na fila médica como ${RISK_META[level!].label.toUpperCase()}.`);
           qc.invalidateQueries({ queryKey: ['queue'] });
           router.push('/triagem');
@@ -191,9 +227,19 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
   const waited = useMemo(() => (data ? minutesSince(data.attendance.arrivedAt) : 0), [data]);
 
   if (q.isLoading || (data && !texts)) return <Spinner />;
-  if (q.error || !data || !texts) {
-    return <Alert tone="danger" title="Não foi possível abrir a triagem">{q.error instanceof ApiError ? q.error.message : 'Tente novamente.'}</Alert>;
-  }
+  // só bloqueia a tela quando nunca houve dados; uma atualização que falha não esconde o formulário
+  if (!data || !texts) return <LoadError title="Não foi possível abrir a triagem" error={q.error} onRetry={() => void q.refetch()} />;
+
+  const discardDraft = () => {
+    clearDraft(dKey);
+    setRestoredAt(null);
+    setVitals(emptyVitals());
+    setObservation('');
+    setReason('');
+    setCorrectionReason('');
+    setDirty(false);
+    setTexts(null); // reabre com o que está salvo no servidor
+  };
 
   const setText = (k: keyof Texts) => (v: string) => {
     setTexts({ ...texts, [k]: v });
@@ -280,6 +326,9 @@ export default function TriageFormPage({ params }: { params: Promise<{ id: strin
           <RiskBadge level={data.currentRiskLevel} size="lg" />
         </div>
       </section>
+
+      {restoredAt !== null && <DraftRestoredNotice savedAt={restoredAt} onDiscard={discardDraft} />}
+      {q.error && <StaleDataNotice onRetry={() => void q.refetch()} />}
 
       {editAcc && acc && (
         <Card>

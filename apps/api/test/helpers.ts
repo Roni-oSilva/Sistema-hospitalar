@@ -43,8 +43,8 @@ export class Client {
   get(path: string) {
     return request(this.ctx.app.getHttpServer()).get(path).set('Cookie', this.cookie).then((r) => this.capture(r));
   }
-  post(path: string, body: unknown = {}) {
-    return request(this.ctx.app.getHttpServer()).post(path).set('Cookie', this.cookie).set('X-Requested-With', 'hospital-web').send(body as object).then((r) => this.capture(r));
+  post(path: string, body: unknown = {}, headers: Record<string, string> = {}) {
+    return request(this.ctx.app.getHttpServer()).post(path).set('Cookie', this.cookie).set('X-Requested-With', 'hospital-web').set(headers).send(body as object).then((r) => this.capture(r));
   }
   put(path: string, body: unknown = {}) {
     return request(this.ctx.app.getHttpServer()).put(path).set('Cookie', this.cookie).set('X-Requested-With', 'hospital-web').send(body as object).then((r) => this.capture(r));

@@ -105,6 +105,61 @@ describe('Segurança e integridade', () => {
     });
   });
 
+  describe('rede instável', () => {
+    it('reenvio da mesma gravação (mesma Idempotency-Key) devolve a resposta original e não duplica o registro', async () => {
+      const att = await createAttendance(reception, (await createPatient(reception)).id);
+      expect((await triage.post(`/api/triage/${att.id}/start`, {})).status).toBe(200);
+      const url = `/api/triage/${att.id}/vitals`;
+      const key = { 'Idempotency-Key': 'afericao-perdida-1' };
+
+      // a resposta "se perde" e o navegador reenvia: o servidor devolve a mesma resposta, sem gravar de novo
+      const first = await triage.post(url, { heartRate: 88 }, key);
+      expect(first.status).toBe(201);
+      const again = await triage.post(url, { heartRate: 88 }, key);
+      expect(again.status).toBe(201);
+      expect(again.headers['idempotent-replay']).toBe('true');
+      expect(again.body).toEqual(first.body);
+
+      // dois envios simultâneos com a mesma chave: um grava, o outro espera e recebe o mesmo resultado
+      const key2 = { 'Idempotency-Key': 'afericao-simultanea-2' };
+      const [a, b] = await Promise.all([triage.post(url, { respiratoryRate: 18 }, key2), triage.post(url, { respiratoryRate: 18 }, key2)]);
+      expect([a.status, b.status]).toEqual([201, 201]);
+      expect(a.body).toEqual(b.body);
+      expect(await ctx.prisma.triageVital.count({ where: { attendanceId: att.id } })).toBe(2);
+
+      // a mesma chave com outro conteúdo é recusada (seria um erro do cliente)
+      const reused = await triage.post(url, { heartRate: 120 }, key);
+      expect(reused.status).toBe(422);
+      expect(reused.body.code).toBe('IDEMPOTENCY_KEY_REUSED');
+      // sem chave, cada envio grava (comportamento normal)
+      expect((await triage.post(url, { heartRate: 90 })).status).toBe(201);
+      expect(await ctx.prisma.triageVital.count({ where: { attendanceId: att.id } })).toBe(3);
+
+      // a chave é por usuário: outra profissional usando a mesma chave não recebe a resposta de ninguém
+      const other = await Client.login(ctx, 't.triagem2');
+      const att2 = await createAttendance(reception, (await createPatient(reception)).id);
+      expect((await other.post(`/api/triage/${att2.id}/start`, {})).status).toBe(200);
+      const own = await other.post(`/api/triage/${att2.id}/vitals`, { heartRate: 88 }, key);
+      expect(own.status).toBe(201);
+      expect(own.headers['idempotent-replay']).toBeUndefined();
+      expect(await ctx.prisma.triageVital.count({ where: { attendanceId: att2.id } })).toBe(1);
+    });
+
+    it('gravação que falhou não é lembrada: o reenvio com a mesma chave executa de novo', async () => {
+      const att = await createAttendance(reception, (await createPatient(reception)).id);
+      expect((await triage.post(`/api/triage/${att.id}/start`, {})).status).toBe(200);
+      const key = { 'Idempotency-Key': 'classificacao-falhou-3' };
+      // finalizar sem classificação falha (regra de negócio) e nada é gravado
+      const fail = await triage.post(`/api/triage/${att.id}/finish`, {}, key);
+      expect(fail.status).toBe(422);
+      expect(fail.body.code).toBe('CLASSIFICATION_REQUIRED');
+      const failAgain = await triage.post(`/api/triage/${att.id}/finish`, {}, key);
+      expect(failAgain.status).toBe(422);
+      expect(failAgain.headers['idempotent-replay']).toBeUndefined();
+      await triage.post(`/api/triage/${att.id}/release`, { reason: 'fim do teste' });
+    });
+  });
+
   describe('imutabilidade garantida pelo banco (mesmo fora da aplicação)', () => {
     it('linha do tempo, histórico de status e auditoria não podem ser alterados nem apagados', async () => {
       const p = await createPatient(reception);

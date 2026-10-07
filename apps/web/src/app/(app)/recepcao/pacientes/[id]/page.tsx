@@ -11,7 +11,7 @@ import { useSession } from '@/lib/session';
 import type { AttendanceListItem, PatientDetail } from '@/lib/types';
 import { PatientForm } from '@/components/patient-form';
 import { AccessibilityBadges, AccessibilityDetails, StatusBadge } from '@/components/clinical';
-import { Alert, Button, Card, CardHeader, DataItem, PageHeader, Spinner } from '@/components/ui';
+import { Button, Card, CardHeader, DataItem, LoadError, PageHeader, Spinner } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 export default function PatientPage({ params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +24,8 @@ export default function PatientPage({ params }: { params: Promise<{ id: string }
   const visits = useQuery({ queryKey: ['patient', id, 'visits'], queryFn: () => api<Pick<AttendanceListItem, 'id' | 'code' | 'status' | 'arrivedAt' | 'finishedAt' | 'reason'>[]>(`/patients/${id}/attendances`) });
 
   if (q.isLoading) return <Spinner />;
-  if (q.error || !q.data) return <Alert tone="danger">Não foi possível abrir o cadastro.</Alert>;
+  // uma atualização que falha não fecha a tela (nem apaga o que está sendo editado no formulário abaixo)
+  if (!q.data) return <LoadError title="Não foi possível abrir o cadastro" error={q.error} onRetry={() => void q.refetch()} />;
   const p = q.data;
   const active = visits.data?.find((v) => !['ATENDIMENTO_FINALIZADO', 'CANCELADO'].includes(v.status));
 

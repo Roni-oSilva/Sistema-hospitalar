@@ -6,7 +6,7 @@ import { Lock } from 'lucide-react';
 import { PERMISSIONS } from '@hospital/shared';
 import { ApiError, api, put } from '@/lib/api';
 import { useSession } from '@/lib/session';
-import { Alert, Button, Card, PageHeader, Spinner, cx } from '@/components/ui';
+import { Alert, Button, Card, LoadError, PageHeader, Spinner, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 interface RolesResponse {
@@ -31,7 +31,8 @@ export default function PermissionsPage() {
     if (q.data) setMatrix(Object.fromEntries(q.data.roles.map((r) => [r.code, new Set(r.permissions)])));
   }, [q.data]);
 
-  if (q.isLoading || !q.data) return <Spinner />;
+  if (q.isLoading) return <Spinner />;
+  if (!q.data) return <LoadError title="Não foi possível abrir os perfis e permissões" error={q.error} onRetry={() => void q.refetch()} />;
   const modules = Array.from(new Set(q.data.permissions.map((p) => p.module)));
   const dirty = (code: string) => {
     const orig = q.data!.roles.find((r) => r.code === code)!.permissions;

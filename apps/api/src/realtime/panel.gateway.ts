@@ -15,7 +15,8 @@ export function safeEqual(a: string, b: string): boolean {
  * Namespace PÚBLICO /painel para a TV de chamada. Sem login — por isso só transmite
  * senha + número do atendimento + consultório. Se PUBLIC_PANEL_KEY estiver configurada, o aparelho precisa da chave.
  */
-@WebSocketGateway({ namespace: '/painel', path: '/socket.io' })
+// mesmas opções do servidor principal (quem sobe primeiro cria o servidor Socket.IO compartilhado)
+@WebSocketGateway({ namespace: '/painel', path: '/socket.io', transports: ['websocket', 'polling'], pingInterval: 10_000, pingTimeout: 10_000 })
 export class PanelGateway implements OnGatewayInit, OnGatewayConnection {
   constructor(
     private readonly realtime: RealtimeService,

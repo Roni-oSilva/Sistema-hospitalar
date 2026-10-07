@@ -24,11 +24,26 @@ import { ApiError, api, post, put } from '@/lib/api';
 import { fmtDate, fmtDateTime, fmtTime } from '@/lib/format';
 import type { HistoryItem, MedicalView } from '@/lib/types';
 import { AccessibilityBadges, AccessibilityDetails, AllergyNote, deniesAllergy, RiskBadge, RiskPicker, StatusBadge, Timeline, VitalsGrid } from '@/components/clinical';
-import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Spinner, Textarea, cx } from '@/components/ui';
+import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, LoadError, Spinner, Textarea, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
+import { DraftRestoredNotice, StaleDataNotice } from '@/components/draft-notice';
+import { clearDraft, draftKey, takeDraft, useDraftPersistence, useUnsavedChangesWarning } from '@/lib/drafts';
 
 type Texts = Record<'chiefComplaint' | 'history' | 'examination' | 'conduct', string>;
 const emptyItem = { medication: '', dose: '', route: '', frequency: '', duration: '', notes: '' };
+const emptyDx = { code: '', description: '', isPrimary: false };
+/** O que fica guardado no rascunho local enquanto não é salvo. */
+interface ConsultationDraft {
+  texts: Texts;
+  dirty: boolean;
+  item: typeof emptyItem;
+  dx: typeof emptyDx;
+  outcome: Outcome | null;
+  finalNotes: string;
+  note: string;
+  correcting: boolean;
+  correctionReason: string;
+}
 
 export default function ConsultationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -55,6 +70,8 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
   const [reclass, setReclass] = useState<{ open: boolean; level: RiskLevel | null; reason: string }>({ open: false, level: null, reason: '' });
   const [showHistory, setShowHistory] = useState(false);
   const [note, setNote] = useState('');
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const dKey = draftKey('consulta', id);
 
   const history = useQuery({ queryKey: ['attendance', id, 'history'], queryFn: () => api<HistoryItem[]>(`/medical/attendances/${id}/history`), enabled: showHistory });
 
@@ -64,19 +81,49 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
     if (texts && !dirty && baseVersion === d.consultation.version) return;
     if (texts && dirty) return;
     const c = d.consultation;
+    if (!texts) {
+      // a rede caiu / a tela recarregou antes de salvar? recupera o que tinha sido digitado
+      const draft = takeDraft<ConsultationDraft>(draftKey('consulta', id), c.version);
+      if (draft) {
+        const v = draft.value;
+        setTexts(v.texts);
+        setDirty(v.dirty);
+        setItem(v.item);
+        setDx(v.dx);
+        setOutcome(v.outcome);
+        setFinalNotes(v.finalNotes);
+        setNote(v.note);
+        setCorrecting(v.correcting);
+        setCorrectionReason(v.correctionReason);
+        setBaseVersion(c.version);
+        setRestoredAt(draft.savedAt);
+        return;
+      }
+    }
     setTexts({ chiefComplaint: c.chiefComplaint ?? '', history: c.history ?? '', examination: c.examination ?? '', conduct: c.conduct ?? '' });
     setBaseVersion(c.version);
-  }, [d, texts, dirty, baseVersion]);
+  }, [d, texts, dirty, baseVersion, id]);
 
-  // aviso ao sair com alterações não salvas
-  useEffect(() => {
-    if (!dirty) return;
-    const h = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [dirty]);
+  // tudo que ainda não chegou ao servidor (texto, medicação/diagnóstico em digitação, desfecho) vira rascunho local
+  const isFinished = d?.attendance.status === 'ATENDIMENTO_FINALIZADO';
+  const pending =
+    Boolean(texts) &&
+    (dirty ||
+      Object.values(item).some((v) => v.trim() !== '') ||
+      dx.code.trim() !== '' ||
+      dx.description.trim() !== '' ||
+      note.trim() !== '' ||
+      correctionReason.trim() !== '' ||
+      (!isFinished && (outcome !== null || finalNotes.trim() !== '')));
+  useDraftPersistence<ConsultationDraft | null>(
+    dKey,
+    texts ? { texts, dirty, item, dx, outcome, finalNotes, note, correcting, correctionReason } : null,
+    pending,
+    baseVersion,
+    Boolean(texts) && baseVersion !== null,
+  );
+  // aviso ao fechar/recarregar com algo não salvo
+  useUnsavedChangesWarning(pending);
 
   const editable = Boolean(d?.permissions.canEdit);
   const textEditable = editable || (correcting && Boolean(d?.permissions.canCorrect));
@@ -133,7 +180,22 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
   });
 
   if (q.isLoading) return <Spinner />;
-  if (q.error || !d) return <Alert tone="danger" title="Não foi possível abrir o atendimento">{q.error instanceof ApiError ? q.error.message : 'Tente novamente.'}</Alert>;
+  // só bloqueia a tela quando nunca houve dados; uma atualização que falha não esconde o formulário
+  if (!d) return <LoadError title="Não foi possível abrir o atendimento" error={q.error} onRetry={() => void q.refetch()} />;
+
+  const discardDraft = () => {
+    clearDraft(dKey);
+    setRestoredAt(null);
+    setItem(emptyItem);
+    setDx(emptyDx);
+    setOutcome(null);
+    setFinalNotes('');
+    setNote('');
+    setCorrecting(false);
+    setCorrectionReason('');
+    setDirty(false);
+    setTexts(null); // reabre com o que está salvo no servidor
+  };
 
   const p = d.permissions;
   const activeItems = d.prescriptionItems.filter((i) => !i.canceled);
@@ -166,7 +228,7 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
       try {
         const v = await post<MedicalView>(`/medical/attendances/${id}/diagnoses`, dx);
         apply(v);
-        setDx({ code: '', description: '', isPrimary: false });
+        setDx(emptyDx);
       } catch (e) {
         if (e instanceof ApiError && Object.keys(e.fieldErrors).length) setDxErrors(e.fieldErrors);
         else throw e;
@@ -184,6 +246,7 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
       if (!(await saveTexts())) return;
       const v = await post<MedicalView>(`/medical/attendances/${id}/finish`, { outcome, finalNotes });
       apply(v);
+      clearDraft(dKey);
       qc.invalidateQueries({ queryKey: ['queue'] });
       toast.show('ok', 'Atendimento finalizado', `${d!.patient.displayName} · ${OUTCOME_LABELS[outcome]}`);
     });
@@ -243,6 +306,8 @@ export default function ConsultationPage({ params }: { params: Promise<{ id: str
           {d.queue?.assignedTo ? `Chamado por ${d.queue.assignedTo.name} (${d.queue.room?.name}).` : 'Chame-o pela fila médica para iniciar o atendimento.'}
         </Alert>
       )}
+      {restoredAt !== null && <DraftRestoredNotice savedAt={restoredAt} onDiscard={discardDraft} />}
+      {q.error && <StaleDataNotice onRetry={() => void q.refetch()} />}
       {error && <Alert tone="danger" title="Atenção">{error}</Alert>}
 
       <div className="grid gap-6 xl:grid-cols-[2fr_3fr]">

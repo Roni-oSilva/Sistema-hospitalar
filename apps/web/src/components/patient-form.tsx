@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Plus, Save, Trash2, UserCheck } from 'lucide-react';
 import { SEXES, SEX_LABELS, UF_LIST, calcAge, createPatientSchema, updatePatientSchema } from '@hospital/shared';
 import { ApiError, post, put } from '@/lib/api';
@@ -9,6 +9,8 @@ import { brDateToIso, isoToBrDate, maskCepInput, maskCnsInput, maskCpfInput, mas
 import type { PatientDetail } from '@/lib/types';
 import { AccessibilityEditor, fromAccessibility, toAccessibilityInput, type AccessibilityValue } from './accessibility-editor';
 import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, Select } from './ui';
+import { DraftRestoredNotice } from './draft-notice';
+import { clearDraft, draftKey, takeDraft, useDraftPersistence, useUnsavedChangesWarning } from '@/lib/drafts';
 
 interface Phone {
   type: 'TELEFONE' | 'CELULAR';
@@ -88,6 +90,32 @@ export function PatientForm({ patient, onSaved, initialName }: { patient?: Patie
   const [formError, setFormError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [saving, setSaving] = useState<null | 'attend' | 'stay'>(null);
+
+  // rascunho local: se a rede cair ou a tela recarregar antes de salvar, nada do que foi digitado se perde
+  const dKey = draftKey('cadastro', patient?.id ?? 'novo');
+  const base = patient?.version ?? null;
+  const initial = useMemo(() => initialState(patient, initialName), [patient, initialName]);
+  const [restoredAt, setRestoredAt] = useState<number | null>(null);
+  const [draftChecked, setDraftChecked] = useState(false);
+  const checkedRef = useRef(false);
+  useEffect(() => {
+    if (checkedRef.current) return; // só ao abrir o formulário
+    checkedRef.current = true;
+    const d = takeDraft<FormState>(dKey, base);
+    if (d) {
+      setS(d.value);
+      setRestoredAt(d.savedAt);
+    }
+    setDraftChecked(true);
+  }, [dKey, base]);
+  const pending = JSON.stringify(s) !== JSON.stringify(initial);
+  useDraftPersistence(dKey, s, pending, base, draftChecked);
+  useUnsavedChangesWarning(pending);
+  const discardDraft = () => {
+    clearDraft(dKey);
+    setRestoredAt(null);
+    setS(initial);
+  };
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setS((prev) => ({ ...prev, [k]: v }));
 
   const birthIso = brDateToIso(s.birthDate);
@@ -135,6 +163,7 @@ export function PatientForm({ patient, onSaved, initialName }: { patient?: Patie
     setSaving(next);
     try {
       const saved = editing ? await put<PatientDetail>(`/patients/${patient!.id}`, body) : await post<PatientDetail>('/patients', body);
+      clearDraft(dKey);
       onSaved(saved, next);
     } catch (e) {
       if (e instanceof ApiError) {
@@ -157,6 +186,7 @@ export function PatientForm({ patient, onSaved, initialName }: { patient?: Patie
 
   return (
     <form onSubmit={onSubmit} noValidate className="flex flex-col gap-6">
+      {restoredAt !== null && <DraftRestoredNotice savedAt={restoredAt} onDiscard={discardDraft} />}
       {formError && <Alert tone="danger" title="Não foi possível salvar">{formError}</Alert>}
       {duplicate?.kind === 'document' && (
         <Alert

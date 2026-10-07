@@ -25,7 +25,7 @@ export function configureApp(app: NestExpressApplication): AppConfig {
     origin: config.webOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'X-Requested-With', 'X-Request-Id'],
+    allowedHeaders: ['Content-Type', 'X-Requested-With', 'X-Request-Id', 'Idempotency-Key'],
   });
   const ctx = app.get(RequestContextMiddleware);
   app.use(ctx.use.bind(ctx));

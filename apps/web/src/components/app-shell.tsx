@@ -19,6 +19,7 @@ import {
   Stethoscope,
   UserPlus,
   Users,
+  CloudOff,
   Wifi,
   WifiOff,
   X,
@@ -28,6 +29,9 @@ import { PERMISSIONS, type PermissionCode } from '@hospital/shared';
 import { useSession } from '@/lib/session';
 import { useRealtimeStatus } from '@/lib/realtime';
 import { api, post } from '@/lib/api';
+import { noteServerDate } from '@/lib/clock';
+import { reportOffline, reportOnline, useOfflineSince } from '@/lib/connectivity';
+import { useToast } from './toast';
 import { prefs } from '@/lib/prefs';
 import { fmtTime } from '@/lib/format';
 import type { NotificationsResponse, PublicSettings } from '@/lib/types';
@@ -74,6 +78,8 @@ function isActive(pathname: string, href: string): boolean {
 export function AppShell({ children }: { children: ReactNode }) {
   const { canAny } = useSession();
   const pathname = usePathname();
+  const offlineSince = useOfflineSince();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
   const settings = useQuery({ queryKey: ['settings', 'public'], queryFn: () => api<PublicSettings>('/settings/public'), staleTime: 10 * 60_000 });
@@ -96,6 +102,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                       href={i.href}
                       target={i.external ? '_blank' : undefined}
                       aria-current={active ? 'page' : undefined}
+                      onClick={(e) => {
+                        // sem conexão, trocar de tela levaria à página de erro do navegador e o que está na tela se perderia
+                        if (offlineSince === null) return;
+                        e.preventDefault();
+                        toast.show('error', 'Sem conexão com o servidor', 'Continue nesta tela. Assim que a conexão voltar, você pode trocar de tela.');
+                      }}
                       className={cx(
                         'flex min-h-11 items-center gap-3 rounded-full px-4 font-semibold transition-colors',
                         active ? 'bg-lime text-ink shadow-[0_8px_18px_-10px_rgb(94_240_124/0.9)]' : 'text-white/85 hover:bg-white/10 hover:text-white',
@@ -135,6 +147,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex min-w-0 flex-col">
         <TopBar onMenu={() => setOpen(true)} />
+        <ConnectivityWatcher />
+        <OfflineBanner />
         <IdleWarning />
         <main id="conteudo" tabIndex={-1} className="mx-auto w-full max-w-[90rem] flex-1 px-4 py-6 focus:outline-none sm:px-6 lg:px-8">
           {children}
@@ -161,6 +175,15 @@ function TopBar({ onMenu }: { onMenu: () => void }) {
 
 function ConnectionPill() {
   const status = useRealtimeStatus();
+  const offlineSince = useOfflineSince();
+  if (offlineSince !== null) {
+    return (
+      <span className="inline-flex items-center gap-2 rounded-full bg-danger-soft px-3 py-1 text-sm font-semibold text-danger" role="status">
+        <CloudOff className="size-4" aria-hidden />
+        Sem conexão com o servidor
+      </span>
+    );
+  }
   if (status === 'online') {
     return (
       <span className="inline-flex items-center gap-2 rounded-full bg-lime-soft px-3 py-1 text-sm font-semibold text-ok" role="status">
@@ -245,6 +268,7 @@ function Notifications() {
 
 function UserMenu() {
   const { me, logout } = useSession();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [scale, setScale] = useState<'md' | 'lg' | 'xl'>('md');
   const [device, setDevice] = useState('');
@@ -336,7 +360,14 @@ function UserMenu() {
             <Link href="/alterar-senha" className="flex min-h-11 items-center gap-3 rounded px-3 hover:bg-sunken">
               <KeyRound className="size-4" aria-hidden /> Alterar senha
             </Link>
-            <button type="button" onClick={() => void logout()} className="flex min-h-11 items-center gap-3 rounded px-3 text-left font-semibold text-danger hover:bg-danger-soft">
+            <button
+              type="button"
+              onClick={() =>
+                void logout().then((ok) => {
+                  if (!ok) toast.show('error', 'Não foi possível sair', 'Sem conexão com o servidor: a sessão continua aberta. Tente sair de novo quando a conexão voltar.');
+                })
+              }
+              className="flex min-h-11 items-center gap-3 rounded px-3 text-left font-semibold text-danger hover:bg-danger-soft">
               <LogOut className="size-4" aria-hidden /> Sair
             </button>
           </div>
@@ -349,7 +380,10 @@ function UserMenu() {
 /** Aviso nos últimos 2 minutos antes de a sessão expirar por inatividade. */
 function IdleWarning() {
   const { idleSecondsLeft, keepAlive } = useSession();
+  const offlineSince = useOfflineSince();
   if (idleSecondsLeft > 120) return null;
+  // sem conexão não dá para confirmar a sessão: a faixa de conexão já explica o que fazer
+  if (offlineSince !== null) return null;
   const m = Math.floor(idleSecondsLeft / 60);
   const s = String(idleSecondsLeft % 60).padStart(2, '0');
   return (
@@ -360,6 +394,78 @@ function IdleWarning() {
       <Button size="sm" variant="primary" onClick={() => void keepAlive()}>
         Continuar conectado
       </Button>
+    </div>
+  );
+}
+
+/**
+ * Enquanto o servidor não responde, confere sozinho a cada 5 s (sem recarregar a tela). Quando volta, atualiza o que
+ * falhou e avisa. Usa /api/health, que não renova nem depende da sessão.
+ */
+function ConnectivityWatcher() {
+  const offlineSince = useOfflineSince();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const wasOffline = useRef(false);
+
+  useEffect(() => {
+    const onOffline = () => reportOffline(); // o próprio computador perdeu a rede (cabo/Wi‑Fi)
+    const onOnline = () => void probe();
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (offlineSince === null) return;
+    const t = setInterval(() => void probe(), 5_000);
+    return () => clearInterval(t);
+  }, [offlineSince]);
+
+  useEffect(() => {
+    if (offlineSince !== null) {
+      wasOffline.current = true;
+      return;
+    }
+    if (!wasOffline.current) return;
+    wasOffline.current = false;
+    toast.show('ok', 'Conexão com o servidor restabelecida', 'Os dados desta tela foram atualizados. Confira e salve o que estiver pendente.');
+    void qc.invalidateQueries({ predicate: (query) => query.state.status === 'error' });
+    void qc.invalidateQueries({ type: 'active' });
+  }, [offlineSince, qc, toast]);
+
+  return null;
+}
+
+async function probe(): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4_000);
+  const sentAt = Date.now();
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store', signal: controller.signal });
+    if (res.ok) {
+      noteServerDate(res.headers.get('date'), sentAt, Date.now());
+      reportOnline();
+    }
+  } catch {
+    /* continua sem conexão; tenta de novo no próximo intervalo */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Faixa fixa e clara quando o servidor do hospital não responde (rede local caiu, cabo solto, servidor reiniciando). */
+function OfflineBanner() {
+  const offlineSince = useOfflineSince();
+  if (offlineSince === null) return null;
+  return (
+    <div role="alert" className="sticky top-16 z-10 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-danger/40 bg-danger-soft px-4 py-3 text-center text-ink">
+      <CloudOff className="size-5 shrink-0 text-danger" aria-hidden />
+      <span className="font-bold text-danger">Sem conexão com o servidor desde {fmtTime(new Date(offlineSince).toISOString())}.</span>
+      <span>Não feche nem recarregue esta tela: o que você digitou continua aqui. Tentando reconectar…</span>
     </div>
   );
 }

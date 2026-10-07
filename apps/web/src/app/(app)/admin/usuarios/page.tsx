@@ -7,7 +7,7 @@ import { PERMISSIONS, ROLE_CODES, ROLE_DESCRIPTIONS } from '@hospital/shared';
 import { ApiError, api, post, put } from '@/lib/api';
 import { fmtDateTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
-import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, PageHeader, Select, Spinner, cx } from '@/components/ui';
+import { Alert, Button, Card, CardHeader, Checkbox, Field, Input, LoadError, PageHeader, Select, Spinner, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 interface UserRow {
@@ -87,6 +87,8 @@ export default function UsersPage() {
       <Card>
         {users.isLoading ? (
           <Spinner />
+        ) : users.error && !users.data ? (
+          <LoadError title="Não foi possível carregar os usuários" error={users.error} onRetry={() => void users.refetch()} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left">

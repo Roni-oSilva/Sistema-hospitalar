@@ -10,7 +10,7 @@ import { fmtDateOnly, fmtDateTime, fmtTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import type { AttendanceDetail, TimelineEvent } from '@/lib/types';
 import { AccessibilityBadges, AccessibilityDetails, RiskBadge, StatusBadge, Timeline } from '@/components/clinical';
-import { Alert, Button, Card, CardHeader, DataItem, Field, PageHeader, Spinner, Textarea } from '@/components/ui';
+import { Button, Card, CardHeader, DataItem, Field, LoadError, PageHeader, Spinner, Textarea } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 /** Acompanhamento do atendimento (visão administrativa: status, horários e linha do tempo geral). */
@@ -27,7 +27,7 @@ export default function AttendancePage({ params }: { params: Promise<{ id: strin
   const [busy, setBusy] = useState(false);
 
   if (a.isLoading) return <Spinner />;
-  if (a.error || !a.data) return <Alert tone="danger">Não foi possível abrir o atendimento.</Alert>;
+  if (!a.data) return <LoadError title="Não foi possível abrir o atendimento" error={a.error} onRetry={() => void a.refetch()} />;
   const d = a.data;
   const canCancel =
     (d.status === 'AGUARDANDO_TRIAGEM' && canAny(PERMISSIONS.ATTENDANCES_CANCEL, PERMISSIONS.TRIAGE_PERFORM)) ||

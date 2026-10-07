@@ -13,7 +13,7 @@ import type { AttendanceListItem } from '@/lib/types';
 import { PatientSearch } from '@/components/patient-search';
 import { SummaryStats } from '@/components/summary-stats';
 import { AccessibilityBadges, StatusBadge } from '@/components/clinical';
-import { Button, Card, CardHeader, EmptyState, PageHeader, Spinner, cx } from '@/components/ui';
+import { Button, Card, CardHeader, EmptyState, LoadError, PageHeader, Spinner, cx } from '@/components/ui';
 
 const FILTERS: { label: string; statuses: AttendanceStatus[] | null }[] = [
   { label: 'Todos', statuses: null },
@@ -81,6 +81,9 @@ export default function ReceptionPage() {
           </div>
           {list.isLoading ? (
             <Spinner />
+          ) : list.error && !list.data ? (
+            // sem dados por falha de conexão não é "nenhum atendimento"
+            <LoadError title="Não foi possível carregar os atendimentos" error={list.error} onRetry={() => void list.refetch()} />
           ) : !list.data?.items.length ? (
             <EmptyState title="Nenhum atendimento nesta situação hoje." />
           ) : (

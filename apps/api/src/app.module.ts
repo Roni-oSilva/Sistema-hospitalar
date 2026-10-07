@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule } from './config/config.module';
 import { APP_CONFIG, AppConfig } from './config/env';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { CoreModule } from './common/core.module';
 import { AllExceptionsFilter } from './common/http/all-exceptions.filter';
+import { IdempotencyInterceptor } from './common/http/idempotency.interceptor';
 import { RequestContextMiddleware } from './common/http/request-context.middleware';
 import { AuditModule } from './audit/audit.module';
 import { SettingsModule } from './settings/settings.module';
@@ -65,6 +66,8 @@ import { HealthController } from './health/health.controller';
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    // depois dos guards (precisa do usuário autenticado): reenvio da mesma gravação não duplica registros
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
   ],
 })
 export class AppModule {}

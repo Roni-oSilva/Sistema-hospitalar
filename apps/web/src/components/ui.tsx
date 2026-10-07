@@ -2,6 +2,7 @@
 
 import { forwardRef, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from 'lucide-react';
+import { errorMessage } from '@/lib/api';
 
 export const cx = (...c: (string | false | null | undefined)[]): string => c.filter(Boolean).join(' ');
 
@@ -259,5 +260,22 @@ export function DataItem({ label, value, mono }: { label: string; value: ReactNo
       <dt className="text-xs font-semibold tracking-wide text-ink-3 uppercase">{label}</dt>
       <dd className={cx('text-ink', mono && 'tabular font-mono')}>{value ?? '—'}</dd>
     </div>
+  );
+}
+
+/** Falha ao carregar uma tela que ainda não tem dados: mensagem clara e "Tentar novamente" (nunca girar para sempre). */
+export function LoadError({ title, error, onRetry }: { title: string; error: unknown; onRetry: () => void }) {
+  return (
+    <Alert
+      tone="danger"
+      title={title}
+      actions={
+        <Button size="sm" variant="secondary" onClick={onRetry}>
+          Tentar novamente
+        </Button>
+      }
+    >
+      {error ? errorMessage(error) : 'Tente novamente.'}
+    </Alert>
   );
 }

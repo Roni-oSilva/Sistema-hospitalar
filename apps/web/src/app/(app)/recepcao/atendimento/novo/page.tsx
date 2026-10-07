@@ -12,7 +12,7 @@ import { prefs } from '@/lib/prefs';
 import type { PatientDetail, PublicSettings } from '@/lib/types';
 import { AccessibilityBadges } from '@/components/clinical';
 import { AccessibilityEditor, fromAccessibility, toAccessibilityInput, type AccessibilityValue } from '@/components/accessibility-editor';
-import { Alert, Button, Card, CardHeader, Field, PageHeader, Spinner, Textarea, cx } from '@/components/ui';
+import { Alert, Button, Card, CardHeader, Field, LoadError, PageHeader, Spinner, Textarea, cx } from '@/components/ui';
 
 interface Created {
   id: string;
@@ -55,8 +55,11 @@ function NewAttendanceInner() {
       </Alert>
     );
   }
-  if (patient.isLoading || !acc) return <Spinner />;
-  if (patient.error || !patient.data) return <Alert tone="danger">Paciente não encontrado.</Alert>;
+  if (patient.isLoading || (patient.data && !acc)) return <Spinner />;
+  if (!patient.data || !acc) {
+    if (patient.error instanceof ApiError && patient.error.status === 404) return <Alert tone="danger">Paciente não encontrado.</Alert>;
+    return <LoadError title="Não foi possível abrir o paciente" error={patient.error} onRetry={() => void patient.refetch()} />;
+  }
   const p = patient.data;
 
   async function submit(e: FormEvent) {

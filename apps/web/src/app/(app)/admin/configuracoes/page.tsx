@@ -9,7 +9,7 @@ import { fmtDateTime } from '@/lib/format';
 import { useSession } from '@/lib/session';
 import type { Room } from '@/lib/types';
 import { RiskBadge } from '@/components/clinical';
-import { Button, Card, CardHeader, Checkbox, Input, PageHeader, Spinner, cx } from '@/components/ui';
+import { Button, Card, CardHeader, Checkbox, Input, LoadError, PageHeader, Spinner, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 interface Setting {
@@ -51,7 +51,8 @@ export default function SettingsPage() {
 function Parameters() {
   const { can } = useSession();
   const q = useQuery({ queryKey: ['admin', 'settings'], queryFn: () => api<Setting[]>('/admin/settings') });
-  if (q.isLoading || !q.data) return <Spinner />;
+  if (q.isLoading) return <Spinner />;
+  if (!q.data) return <LoadError title="Não foi possível abrir as configurações" error={q.error} onRetry={() => void q.refetch()} />;
   return (
     <div className="flex flex-col gap-4">
       {q.data.map((s) => (

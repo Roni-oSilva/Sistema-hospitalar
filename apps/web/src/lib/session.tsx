@@ -4,7 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { usePathname, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ROLE_DESCRIPTIONS, type PermissionCode, type RoleCode } from '@hospital/shared';
-import { ApiError, api, onApiActivity, onUnauthorized } from './api';
+import { ApiError, api, isConnectionError, onApiActivity, onUnauthorized } from './api';
+import { clearAllDrafts, setDraftOwner } from './drafts';
 import type { Me } from './types';
 import { Spinner } from '@/components/ui';
 
@@ -12,7 +13,8 @@ interface SessionValue {
   me: Me;
   can: (p: PermissionCode) => boolean;
   canAny: (...p: PermissionCode[]) => boolean;
-  logout: () => Promise<void>;
+  /** false quando não foi possível encerrar a sessão no servidor (sem conexão): a pessoa continua na tela. */
+  logout: () => Promise<boolean>;
   /** Segundos até expirar por inatividade (aproximação local; o servidor é a fonte da verdade). */
   idleSecondsLeft: number;
   keepAlive: () => Promise<void>;
@@ -50,6 +52,8 @@ export function SessionProvider({ children, allowPendingPassword = false }: { ch
     queryFn: () => api<Me>('/auth/me', { silentAuth: true }),
     retry: (count, err) => !(err instanceof ApiError && err.status === 401) && count < 2,
     staleTime: 5 * 60_000,
+    // na tela "não foi possível conectar", tenta de novo sozinho até o servidor voltar
+    refetchInterval: (query) => (query.state.status === 'error' && !query.state.data ? 10_000 : false),
   });
 
   const goLogin = useCallback(
@@ -89,11 +93,17 @@ export function SessionProvider({ children, allowPendingPassword = false }: { ch
     // confirma com o servidor (outra aba pode ter mantido a sessão ativa)
     api('/auth/session', { silentAuth: true })
       .then(() => setLastActivity(Date.now() - (idleMinutes - 1) * 60_000))
-      .catch(() => goLogin('inatividade'));
+      .catch((e) => {
+        // só a resposta do servidor encerra a sessão; sem conexão, confere de novo em 15 s (nada é perdido)
+        if (e instanceof ApiError && e.status === 401) goLogin('inatividade');
+        else setLastActivity(Date.now() - idleMinutes * 60_000 + 15_000);
+      });
   }, [idleSecondsLeft, me, goLogin, idleMinutes]);
 
   const value = useMemo<SessionValue | null>(() => {
     if (!me) return null;
+    // antes das telas montarem: rascunhos locais pertencem a este usuário (os de outra pessoa nesta aba são apagados)
+    setDraftOwner(me.user.id);
     const perms = new Set(me.user.permissions);
     return {
       me,
@@ -102,9 +112,13 @@ export function SessionProvider({ children, allowPendingPassword = false }: { ch
       logout: async () => {
         try {
           await api('/auth/logout', { method: 'POST', silentAuth: true });
-        } finally {
-          goLogin('saiu');
+        } catch (e) {
+          // sem conexão a sessão continuaria valendo no servidor: não finge que saiu
+          if (isConnectionError(e)) return false;
         }
+        clearAllDrafts();
+        goLogin('saiu');
+        return true;
       },
       idleSecondsLeft,
       keepAlive: async () => {

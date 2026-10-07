@@ -19,7 +19,8 @@ import { RealtimeService } from './realtime.service';
  * Cada socket entra apenas nas salas a que sua permissão dá direito. A sessão é revalidada a cada minuto:
  * sessão expirada/revogada derruba a conexão (o WebSocket NÃO conta como atividade para o timeout de inatividade).
  */
-@WebSocketGateway({ path: '/socket.io', transports: ['websocket', 'polling'] })
+// ping a cada 10 s: uma queda da rede (Wi‑Fi que cai sem fechar a conexão) é percebida em ~20 s, não ~45 s
+@WebSocketGateway({ path: '/socket.io', transports: ['websocket', 'polling'], pingInterval: 10_000, pingTimeout: 10_000 })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnModuleDestroy {
   @WebSocketServer() private server!: Server;
   private timer: NodeJS.Timeout | null = null;

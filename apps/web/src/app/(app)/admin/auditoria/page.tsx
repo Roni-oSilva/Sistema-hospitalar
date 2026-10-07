@@ -6,7 +6,7 @@ import { Search } from 'lucide-react';
 import { ACCESS_EVENTS, dayRange } from '@hospital/shared';
 import { api } from '@/lib/api';
 import { fmtDateTime } from '@/lib/format';
-import { Button, Card, Input, PageHeader, Select, Spinner, cx } from '@/components/ui';
+import { Button, Card, Input, LoadError, PageHeader, Select, Spinner, cx } from '@/components/ui';
 
 interface AuditItem {
   id: string;
@@ -112,8 +112,10 @@ function Actions() {
           Filtrar
         </Button>
       </form>
-      {q.isLoading || !q.data ? (
+      {q.isLoading ? (
         <Spinner />
+      ) : !q.data ? (
+        <LoadError title="Não foi possível carregar a auditoria" error={q.error} onRetry={() => void q.refetch()} />
       ) : (
         <>
           <div className="overflow-x-auto">
@@ -191,8 +193,10 @@ function Access() {
           <Input value={username} onChange={(e) => (setUsername(e.target.value), setPage(1))} />
         </label>
       </div>
-      {q.isLoading || !q.data ? (
+      {q.isLoading ? (
         <Spinner />
+      ) : !q.data ? (
+        <LoadError title="Não foi possível carregar a auditoria" error={q.error} onRetry={() => void q.refetch()} />
       ) : (
         <>
           <div className="overflow-x-auto">

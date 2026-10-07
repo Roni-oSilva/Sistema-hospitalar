@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Clock, Hourglass, Timer } from 'lucide-react';
 import { OUTCOME_LABELS, localDateString, type Outcome, type RiskLevel } from '@hospital/shared';
-import { ApiError, api } from '@/lib/api';
+import { api } from '@/lib/api';
 import { fmtAvgMinutes } from '@/lib/format';
 import { useFallbackInterval } from '@/lib/realtime';
 import type { Summary } from '@/lib/types';
 import { RiskBadge } from '@/components/clinical';
-import { Alert, Card, CardHeader, Input, PageHeader, Spinner, Stat, cx } from '@/components/ui';
+import { Card, CardHeader, Input, LoadError, PageHeader, Spinner, Stat, cx } from '@/components/ui';
 import { serverNow } from '@/lib/clock';
 
 interface Indicators {
@@ -32,7 +32,8 @@ export default function DashboardPage() {
     refetchInterval: date === today ? interval || 60_000 : false,
   });
 
-  if (q.error) return <Alert tone="danger" title="Indicadores indisponíveis">{q.error instanceof ApiError ? q.error.message : 'Tente novamente.'}</Alert>;
+  // com dados já carregados, uma atualização que falha mantém os números na tela (a faixa de conexão avisa)
+  if (q.error && !q.data) return <LoadError title="Indicadores indisponíveis" error={q.error} onRetry={() => void q.refetch()} />;
   const d = q.data;
   const isToday = date === today;
 

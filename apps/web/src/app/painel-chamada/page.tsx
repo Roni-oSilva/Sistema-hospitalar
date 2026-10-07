@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { io } from 'socket.io-client';
-import { Volume2, VolumeX, WifiOff } from 'lucide-react';
+import { MicOff, Volume2, VolumeX, WifiOff } from 'lucide-react';
 import { REALTIME_EVENTS, type PanelCallEvent } from '@hospital/shared';
 import { SOCKET_URL } from '@/lib/realtime';
 import { prefs } from '@/lib/prefs';
@@ -27,9 +27,23 @@ function rankPortugueseVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVo
   return voices.filter(isPortuguese).sort((a, b) => score(a) - score(b));
 }
 
+const DEFAULT_HOSPITAL = 'Hospital Municipal de Ulianópolis';
+/** Chamadas que chegam pela atualização periódica/reconexão só são anunciadas se forem recentes. */
+const MISSED_CALL_MAX_AGE_MS = 3 * 60_000;
+/** Intervalo entre dois anúncios seguidos (bipe + voz), para não sobrepor. */
+const ANNOUNCE_GAP_MS = 6_500;
+const callKey = (c: PanelCallEvent) => `${c.code}|${c.calledAt}`;
+
+type VoiceStatus = 'desconhecida' | 'ok' | 'indisponivel';
+
 /**
  * PAINEL PÚBLICO (TV da sala de espera). Mostra SOMENTE senha, número do atendimento e consultório.
  * Nunca nome, idade, CPF, deficiência, sintomas, classificação ou qualquer dado médico.
+ *
+ * Pensado para ficar ligado o dia todo numa rede que pode oscilar:
+ *  - chamadas feitas enquanto a TV estava desconectada são anunciadas quando ela volta (se recentes);
+ *  - depois de reiniciar/recarregar, o navegador bloqueia som e voz até alguém tocar na tela: o painel avisa;
+ *  - a voz instalada no aparelho tem prioridade (as vozes "online" param sem internet).
  */
 function Panel() {
   const params = useSearchParams();
@@ -38,11 +52,17 @@ function Panel() {
   const [online, setOnline] = useState(true);
   const [flash, setFlash] = useState(0);
   const [sound, setSound] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('desconhecida');
   const [clock, setClock] = useState(() => new Date(serverNow()));
   const [denied, setDenied] = useState(false);
   const soundRef = useRef(false);
   const audioRef = useRef<AudioContext | null>(null);
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+  const announcedRef = useRef(new Set<string>());
+  const firstLoadRef = useRef(true);
+  const nextSlotRef = useRef(0);
+  const speakingSinceRef = useRef(0);
 
   // a lista de vozes chega de forma assíncrona em alguns navegadores
   useEffect(() => {
@@ -53,12 +73,101 @@ function Panel() {
     return () => window.speechSynthesis.removeEventListener('voiceschanged', refresh);
   }, []);
 
-  useEffect(() => {
-    setSound(prefs.panelSound());
+  /** Cria/retoma o áudio. Sem um toque na tela (ou o Chrome em modo quiosque com autoplay liberado) fica bloqueado. */
+  const ensureAudio = useCallback((): AudioContext | null => {
+    try {
+      const ctx = audioRef.current ?? new AudioContext();
+      audioRef.current = ctx;
+      if (ctx.state !== 'running') void ctx.resume().catch(() => undefined);
+      return ctx;
+    } catch {
+      return null;
+    }
   }, []);
+
+  useEffect(() => {
+    const wanted = prefs.panelSound();
+    setSound(wanted);
+    soundRef.current = wanted;
+    if (!wanted) return;
+    // ao abrir com o som ligado (ex.: TV reiniciou), confere se o navegador liberou o áudio
+    const ctx = ensureAudio();
+    const t = window.setTimeout(() => setAudioBlocked(!ctx || ctx.state !== 'running'), 400);
+    return () => window.clearTimeout(t);
+  }, [ensureAudio]);
   useEffect(() => {
     soundRef.current = sound;
   }, [sound]);
+
+  const speak = useCallback((text: string, voices: SpeechSynthesisVoice[]) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = voices[0]?.lang ?? 'pt-BR';
+    if (voices[0]) u.voice = voices[0];
+    u.rate = 0.9;
+    u.onstart = () => (speakingSinceRef.current = Date.now());
+    u.onend = () => {
+      speakingSinceRef.current = 0;
+      setVoiceStatus('ok');
+    };
+    u.onerror = (e) => {
+      speakingSinceRef.current = 0;
+      if (e.error === 'interrupted' || e.error === 'canceled') return;
+      if (e.error === 'not-allowed') {
+        setAudioBlocked(true); // navegador exige um toque na tela
+        return;
+      }
+      // voz online sem internet, voz removida etc.: tenta a próxima instalada antes de desistir
+      if (voices.length > 1) speak(text, voices.slice(1));
+      else setVoiceStatus('indisponivel');
+    };
+    window.speechSynthesis.speak(u);
+  }, []);
+
+  const announceNow = useCallback(
+    (c: PanelCallEvent) => {
+      const ctx = ensureAudio();
+      if (ctx) {
+        if (ctx.state !== 'running') setAudioBlocked(true);
+        [0, 0.28].forEach((t, i) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.frequency.value = i ? 660 : 880;
+          g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+          g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + t + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.25);
+          o.connect(g).connect(ctx.destination);
+          o.start(ctx.currentTime + t);
+          o.stop(ctx.currentTime + t + 0.26);
+        });
+      }
+      if ('speechSynthesis' in window) {
+        // fila de fala presa (acontece em TV ligada o dia todo): destrava antes de falar
+        if (speakingSinceRef.current && Date.now() - speakingSinceRef.current > 15_000) {
+          window.speechSynthesis.cancel();
+          speakingSinceRef.current = 0;
+        }
+        window.setTimeout(() => speak(`Senha ${c.ticket.split('').join(' ')}. ${c.room}.`, voicesRef.current), 650);
+      }
+    },
+    [ensureAudio, speak],
+  );
+
+  /** Anuncia uma chamada uma única vez; várias seguidas entram em fila, sem sobrepor. */
+  const announce = useCallback(
+    (c: PanelCallEvent) => {
+      const k = callKey(c);
+      if (announcedRef.current.has(k)) return;
+      announcedRef.current.add(k);
+      if (announcedRef.current.size > 200) announcedRef.current = new Set([...announcedRef.current].slice(-100));
+      setFlash((n) => n + 1);
+      if (!soundRef.current) return;
+      const now = Date.now();
+      const at = Math.max(now, nextSlotRef.current);
+      nextSlotRef.current = at + ANNOUNCE_GAP_MS;
+      window.setTimeout(() => announceNow(c), at - now);
+    },
+    [announceNow],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -70,47 +179,25 @@ function Panel() {
         setDenied(true);
         return;
       }
-      if (res.ok) setData((await res.json()) as PanelData);
+      if (!res.ok) return;
+      const next = (await res.json()) as PanelData;
+      setData(next);
+      if (firstLoadRef.current) {
+        // ao abrir a TV, o que já estava na tela não é anunciado de novo
+        firstLoadRef.current = false;
+        next.calls.forEach((c) => announcedRef.current.add(callKey(c)));
+        return;
+      }
+      // chamadas feitas enquanto a TV estava sem conexão: anuncia as recentes, da mais antiga para a mais nova
+      const now = serverNow();
+      [...next.calls].reverse().forEach((c) => {
+        if (now - new Date(c.calledAt).getTime() <= MISSED_CALL_MAX_AGE_MS) announce(c);
+        else announcedRef.current.add(callKey(c));
+      });
     } catch {
       /* rede instável: mantém a última tela e tenta de novo */
     }
-  }, [key]);
-
-  const announce = useCallback((c: PanelCallEvent) => {
-    if (!soundRef.current) return;
-    try {
-      const ctx = audioRef.current ?? new AudioContext();
-      audioRef.current = ctx;
-      [0, 0.28].forEach((t, i) => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.frequency.value = i ? 660 : 880;
-        g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
-        g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + t + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.25);
-        o.connect(g).connect(ctx.destination);
-        o.start(ctx.currentTime + t);
-        o.stop(ctx.currentTime + t + 0.26);
-      });
-      if ('speechSynthesis' in window) {
-        const text = `Senha ${c.ticket.split('').join(' ')}. ${c.room}.`;
-        const speak = (voices: SpeechSynthesisVoice[]) => {
-          const u = new SpeechSynthesisUtterance(text);
-          u.lang = voices[0]?.lang ?? 'pt-BR';
-          if (voices[0]) u.voice = voices[0];
-          u.rate = 0.9;
-          // voz online sem internet falha com erro: tenta a próxima (instalada) em vez de ficar em silêncio
-          u.onerror = () => {
-            if (voices.length > 1) speak(voices.slice(1));
-          };
-          window.speechSynthesis.speak(u);
-        };
-        window.setTimeout(() => speak(voicesRef.current), 650);
-      }
-    } catch {
-      /* sem áudio disponível */
-    }
-  }, []);
+  }, [key, announce]);
 
   useEffect(() => {
     void load();
@@ -122,8 +209,10 @@ function Panel() {
     socket.on('disconnect', () => setOnline(false));
     socket.on('connect_error', () => setOnline(false));
     socket.on(REALTIME_EVENTS.PANEL_CALL, (c: PanelCallEvent) => {
-      setData((prev) => (prev ? { ...prev, calls: [c, ...prev.calls].slice(0, 8) } : prev));
-      setFlash((n) => n + 1);
+      setData((prev) => ({
+        hospitalName: prev?.hospitalName ?? DEFAULT_HOSPITAL,
+        calls: [c, ...(prev?.calls ?? []).filter((x) => callKey(x) !== callKey(c))].slice(0, 8),
+      }));
       announce(c);
     });
     const poll = setInterval(() => void load(), 30_000); // rede de segurança
@@ -134,6 +223,30 @@ function Panel() {
       clearInterval(tick);
     };
   }, [key, load, announce]);
+
+  /** Toque/clique/tecla em qualquer lugar libera o som bloqueado pelo navegador e testa a voz. */
+  const unlock = useCallback(() => {
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    void ctx.resume().then(() => {
+      setAudioBlocked(ctx.state !== 'running');
+    });
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      speak('Som ativado.', voicesRef.current);
+    }
+  }, [ensureAudio, speak]);
+
+  useEffect(() => {
+    if (!audioBlocked || !sound) return;
+    const onGesture = () => unlock();
+    window.addEventListener('pointerdown', onGesture);
+    window.addEventListener('keydown', onGesture);
+    return () => {
+      window.removeEventListener('pointerdown', onGesture);
+      window.removeEventListener('keydown', onGesture);
+    };
+  }, [audioBlocked, sound, unlock]);
 
   if (denied) {
     return (
@@ -148,26 +261,41 @@ function Panel() {
   return (
     <main className="brand-gradient flex min-h-screen flex-col text-white">
       <header className="flex items-center justify-between gap-4 px-10 py-6">
-        <p className="flex items-center gap-3 font-display text-2xl font-extrabold"><LogoMark className="size-11" />{data?.hospitalName ?? 'Hospital Municipal de Ulianópolis'}</p>
+        <p className="flex items-center gap-3 font-display text-2xl font-extrabold"><LogoMark className="size-11" />{data?.hospitalName || DEFAULT_HOSPITAL}</p>
         <div className="flex items-center gap-4">
           {!online && (
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-lg">
               <WifiOff className="size-5" aria-hidden /> Reconectando…
             </span>
           )}
+          {sound && voiceStatus === 'indisponivel' && !audioBlocked && (
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-lg">
+              <MicOff className="size-5" aria-hidden /> Voz indisponível — só aviso sonoro
+            </span>
+          )}
           <button
             type="button"
-            onClick={() => {
-              const next = !sound;
-              setSound(next);
-              prefs.setPanelSound(next);
-              if (next) audioRef.current = audioRef.current ?? new AudioContext();
+            onClick={(e) => {
+              e.stopPropagation(); // o toque no botão já libera o som; não dispara o "toque em qualquer lugar"
+              if (!sound) {
+                setSound(true);
+                soundRef.current = true;
+                prefs.setPanelSound(true);
+                unlock();
+              } else if (audioBlocked) {
+                unlock();
+              } else {
+                setSound(false);
+                soundRef.current = false;
+                prefs.setPanelSound(false);
+              }
             }}
+            onPointerDown={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-lg hover:bg-white/20"
-            aria-pressed={sound}
+            aria-pressed={sound && !audioBlocked}
           >
-            {sound ? <Volume2 className="size-5" aria-hidden /> : <VolumeX className="size-5" aria-hidden />}
-            {sound ? 'Som e voz ativos' : 'Ativar som e voz'}
+            {sound && !audioBlocked ? <Volume2 className="size-5" aria-hidden /> : <VolumeX className="size-5" aria-hidden />}
+            {!sound ? 'Ativar som e voz' : audioBlocked ? 'Liberar som' : 'Som e voz ativos'}
           </button>
           <time className="tabular font-display text-4xl font-extrabold">{fmtTime(clock.toISOString())}</time>
         </div>
@@ -188,6 +316,17 @@ function Panel() {
           <p className="text-4xl text-white/60">Aguarde ser chamado(a) pelo painel.</p>
         )}
       </section>
+
+      {sound && audioBlocked && (
+        // depois de reiniciar, o navegador só libera som e voz com um toque: aviso grande para quem passar pela TV
+        <button
+          type="button"
+          onClick={unlock}
+          className="mx-10 mb-6 flex items-center justify-center gap-4 rounded-3xl bg-lime px-8 py-5 font-display text-3xl font-extrabold text-ink shadow-xl"
+        >
+          <Volume2 className="size-9" aria-hidden /> Toque aqui para ligar o som e a voz das chamadas
+        </button>
+      )}
 
       {recent.length > 0 && (
         <section aria-label="Chamadas anteriores" className="border-t border-white/10 px-10 py-6">

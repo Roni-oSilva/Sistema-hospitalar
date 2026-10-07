@@ -12,7 +12,7 @@ import { fmtMinutes, fmtTime, minutesSince } from '@/lib/format';
 import { useFallbackInterval } from '@/lib/realtime';
 import type { TriageQueueItem } from '@/lib/types';
 import { AccessibilityBadges, RiskBadge, SexLabel } from '@/components/clinical';
-import { Button, Card, CardHeader, EmptyState, PageHeader, Spinner, cx } from '@/components/ui';
+import { Button, Card, CardHeader, EmptyState, LoadError, PageHeader, Spinner, cx } from '@/components/ui';
 import { useToast } from '@/components/toast';
 
 function useNow(ms = 30_000): number {
@@ -90,6 +90,9 @@ export default function TriageQueuePage() {
         <CardHeader title="Aguardando triagem" description={waiting.length ? `${waiting.length} paciente(s) na fila` : undefined} icon={<ClipboardList className="size-5" />} />
         {q.isLoading ? (
           <Spinner />
+        ) : q.error && !q.data ? (
+          // sem dados por falha de conexão não é "fila vazia"
+          <LoadError title="Não foi possível carregar a fila" error={q.error} onRetry={() => void q.refetch()} />
         ) : waiting.length === 0 ? (
           <EmptyState title="Ninguém aguardando triagem." icon={<ClipboardList className="size-10" />}>
             Novos atendimentos aparecem aqui automaticamente.
