@@ -10,6 +10,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
  */
 const PASS = process.env.E2E_PASSWORD ?? 'Desenvolvimento2026';
 const H = { 'X-Requested-With': 'hospital-web', 'Content-Type': 'application/json' };
+/** Em homologação/produção de teste o painel exige a chave (PUBLIC_PANEL_KEY da API). */
+const PANEL = process.env.E2E_PANEL_KEY ? `/painel-chamada?key=${encodeURIComponent(process.env.E2E_PANEL_KEY)}` : '/painel-chamada';
 
 async function open(browser: Browser, user?: string, init?: () => void): Promise<Page> {
   const ctx = await browser.newContext();
@@ -150,7 +152,7 @@ test('TV desconectada: a chamada feita durante a queda é anunciada quando ela r
   let tvNetworkUp = false;
   await panel.route('**/socket.io/**', (r) => (tvNetworkUp ? r.continue() : r.abort('internetdisconnected')));
   await panel.routeWebSocket('**/socket.io/**', (ws) => (tvNetworkUp ? ws.connectToServer() : ws.close()));
-  await panel.goto('/painel-chamada');
+  await panel.goto(PANEL);
   // depois de abrir/reiniciar, o navegador só libera som com um toque: o painel pede
   const unlock = panel.getByRole('button', { name: 'Toque aqui para ligar o som e a voz das chamadas' });
   await expect(unlock).toBeVisible();

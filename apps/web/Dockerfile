@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # Web (Next.js, saída standalone). Contexto de build: raiz do repositório.
 #   docker build -f apps/web/Dockerfile -t hmu-web .
 # Em produção o Nginx serve /api e /socket.io na MESMA origem: NEXT_PUBLIC_SOCKET_URL fica vazio.

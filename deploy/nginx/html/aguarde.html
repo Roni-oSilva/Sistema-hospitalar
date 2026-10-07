@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- servida pelo Nginx quando a API/Web ainda estão subindo (volta da energia, atualização).
+         Recarrega sozinha: a TV do painel e os computadores voltam sem ninguém precisar apertar nada. -->
+    <meta http-equiv="refresh" content="10" />
+    <meta http-equiv="cache-control" content="no-store" />
+    <title>Sistema iniciando — HMU Atende</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        font-family: "Segoe UI", Roboto, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(135deg, #0b2a55 0%, #0f3d7d 55%, #2f6db0 100%);
+        text-align: center;
+      }
+      main { max-width: 44rem; }
+      .mark { width: 72px; height: 72px; margin: 0 auto 28px; }
+      h1 { margin: 0 0 12px; font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 800; letter-spacing: 0.01em; }
+      p { margin: 0; font-size: clamp(1.1rem, 2.2vw, 1.5rem); color: rgb(255 255 255 / 0.85); line-height: 1.5; }
+      .count { display: inline-block; margin-top: 28px; padding: 8px 20px; border-radius: 999px; background: #5ef07c; color: #0c2340; font-weight: 700; font-size: 1.1rem; }
+      @media (prefers-reduced-motion: no-preference) {
+        .mark { animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 50% { transform: scale(0.92); opacity: 0.8; } }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+        <rect width="40" height="40" rx="11" fill="#fff" />
+        <path d="M20 30s-9-5.6-9-12.2A5.2 5.2 0 0 1 20 15a5.2 5.2 0 0 1 9 2.8C29 24.4 20 30 20 30z" fill="#0f3d7d" />
+        <path d="M18.6 17.4h2.8v2.4h2.4v2.8h-2.4V25h-2.8v-2.4h-2.4v-2.8h2.4z" fill="#5ef07c" />
+      </svg>
+      <h1>O sistema está iniciando</h1>
+      <p>Isso acontece depois de uma falta de energia ou de uma atualização. Esta tela recarrega sozinha — não é preciso fazer nada.</p>
+      <span class="count" id="count" role="status">Tentando de novo em 10 s</span>
+    </main>
+    <script>
+      // contagem visível; o meta refresh acima recarrega mesmo se o JavaScript estiver desligado
+      var s = 10;
+      var el = document.getElementById('count');
+      setInterval(function () {
+        s = s > 1 ? s - 1 : 10;
+        el.textContent = 'Tentando de novo em ' + s + ' s';
+      }, 1000);
+    </script>
+  </body>
+</html>

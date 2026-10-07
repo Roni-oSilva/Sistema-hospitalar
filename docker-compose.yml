@@ -1,10 +1,20 @@
-# Implantação de referência (homologação/produção) em um servidor com Docker.
+# Implantação de referência em um servidor DENTRO do hospital (funciona sem internet: ver docs/SEM-INTERNET.md).
 # Guia completo: docs/DEPLOY.md. NENHUM segredo neste arquivo: tudo vem de deploy/env/*.env e deploy/secrets/ (fora do git).
 #
 #   cp deploy/env/api.env.example deploy/env/api.env   # e preencha
-#   docker compose up -d --build
+#   docker compose up -d --build                       # com internet; sem internet: imagens do kit (docker load) e --no-build
 #   docker compose run --rm migrate                    # aplica migrations (usuário DONO do banco)
 #   docker compose run --rm bootstrap                  # dados de referência + 1º administrador
+#
+# Variáveis opcionais (arquivo .env ao lado deste): HMU_VERSION (versão das imagens, padrão "latest") e
+# HMU_BIND_IP (IP da rede do hospital em que o sistema atende, padrão todas as interfaces).
+
+# logs com tamanho limitado: o servidor pode passar meses sem ninguém olhar e disco cheio para o banco
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
 
 name: hmu-atendimento
 
@@ -12,6 +22,9 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
+    # tempo para o banco fechar direito quando o nobreak manda desligar o servidor
+    stop_grace_period: 60s
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-hospital_production}
       POSTGRES_USER: ${POSTGRES_OWNER:-hospital_owner}
@@ -29,8 +42,9 @@ services:
 
   api:
     build: { context: ., dockerfile: apps/api/Dockerfile }
-    image: hmu-api:latest
+    image: hmu-api:${HMU_VERSION:-latest}
     restart: unless-stopped
+    logging: *logging
     env_file: deploy/env/api.env # DATABASE_URL com o usuário de MENOR privilégio (hospital_app)
     environment:
       TRUST_PROXY: '1'
@@ -42,16 +56,20 @@ services:
 
   # comandos de manutenção (executados sob demanda com "docker compose run --rm ...")
   migrate:
-    image: hmu-api:latest
+    image: hmu-api:${HMU_VERSION:-latest}
     profiles: [ops]
     env_file: deploy/env/migrate.env # DATABASE_URL com o usuário DONO (só para migrations)
+    environment:
+      # nada de sair para a internet: aviso de versão do npm e telemetria do Prisma desligados
+      NPM_CONFIG_UPDATE_NOTIFIER: 'false'
+      CHECKPOINT_DISABLE: '1'
     command: ['npx', 'prisma', 'migrate', 'deploy']
     depends_on:
       db: { condition: service_healthy }
     networks: [internal]
 
   bootstrap:
-    image: hmu-api:latest
+    image: hmu-api:${HMU_VERSION:-latest}
     profiles: [ops]
     env_file: [deploy/env/api.env, deploy/env/bootstrap.env]
     command: ['node', 'dist/scripts/bootstrap-admin.js']
@@ -65,8 +83,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_SOCKET_URL: '' # mesma origem (Nginx)
-    image: hmu-web:latest
+    image: hmu-web:${HMU_VERSION:-latest}
     restart: unless-stopped
+    logging: *logging
     read_only: true
     tmpfs: [/tmp, /app/apps/web/.next/cache]
     networks: [internal]
@@ -74,12 +93,16 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    logging: *logging
+    # publique só no IP da rede do hospital (HMU_BIND_IP): as portas do Docker passam por cima do firewall (ufw)
     ports:
-      - '80:80'
-      - '443:443'
+      - '${HMU_BIND_IP:-0.0.0.0}:80:80'
+      - '${HMU_BIND_IP:-0.0.0.0}:443:443'
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./deploy/nginx/certs:/etc/nginx/certs:ro
+      - ./deploy/nginx/html:/usr/share/nginx/hmu:ro
+    # sobe mesmo se a API/Web ainda estiverem iniciando: até lá mostra a página "o sistema está iniciando"
     depends_on: [api, web]
     networks: [internal]
 

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Painel de chamada HMU
+Comment=Abre o painel de chamada em tela cheia ao ligar a TV
+Exec=env HMU_PAINEL_URL=https://atendimento.hmu.internal/painel-chamada?key=COLOQUE_A_CHAVE_DO_PAINEL /home/painel/painel-tv-linux.sh
+X-GNOME-Autostart-enabled=true

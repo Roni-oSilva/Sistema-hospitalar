@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # API (NestJS + Prisma). Contexto de build: raiz do repositório.
 #   docker build -f apps/api/Dockerfile -t hmu-api .
 

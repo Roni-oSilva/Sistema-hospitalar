@@ -42,3 +42,35 @@ jobs:
         run: npm test -w @hospital/api
       - name: Web — lint e build de produção
         run: npm run lint -w @hospital/web && npm run build -w @hospital/web
+
+  docker:
+    # As imagens de produção precisam continuar construindo. No hospital elas chegam PRONTAS (kit offline num
+    # pendrive): o servidor não precisa de internet nem para instalar nem para atualizar.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Imagens de produção (API e Web)
+        run: |
+          docker build -f apps/api/Dockerfile -t hmu-api:ci .
+          docker build -f apps/web/Dockerfile -t hmu-web:ci .
+          docker images hmu-api:ci --format 'hmu-api {{.Size}}'
+          docker images hmu-web:ci --format 'hmu-web {{.Size}}'
+      - name: Kit de instalação offline (só em versões marcadas v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          docker tag hmu-api:ci "hmu-api:$V" && docker tag hmu-web:ci "hmu-web:$V"
+          docker pull postgres:16-alpine && docker pull nginx:1.27-alpine
+          docker save "hmu-api:$V" "hmu-web:$V" postgres:16-alpine nginx:1.27-alpine | gzip > "hmu-imagens-$V.tar.gz"
+          git archive -o "hmu-repo-$V.tar.gz" HEAD
+          sha256sum "hmu-imagens-$V.tar.gz" "hmu-repo-$V.tar.gz" > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: kit-offline-${{ github.ref_name }}
+          path: |
+            hmu-imagens-*.tar.gz
+            hmu-repo-*.tar.gz
+            SHA256SUMS
+          retention-days: 90

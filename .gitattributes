@@ -1,0 +1,3 @@
+# scripts do Windows precisam de quebra de linha CRLF (o cmd.exe erra "goto" com LF)
+*.bat text eol=crlf
+*.sh text eol=lf

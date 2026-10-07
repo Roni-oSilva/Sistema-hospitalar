@@ -7,6 +7,8 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
  */
 const PASS = process.env.E2E_PASSWORD ?? 'Desenvolvimento2026';
 const H = { 'X-Requested-With': 'hospital-web', 'Content-Type': 'application/json' };
+/** Em homologação/produção de teste o painel exige a chave (PUBLIC_PANEL_KEY da API). */
+const PANEL = process.env.E2E_PANEL_KEY ? `/painel-chamada?key=${encodeURIComponent(process.env.E2E_PANEL_KEY)}` : '/painel-chamada';
 
 async function open(browser: Browser, user?: string): Promise<Page> {
   const page = await (await browser.newContext()).newPage();
@@ -40,7 +42,7 @@ async function cleanup(doc: Page): Promise<void> {
 test('fluxo completo: recepção → triagem → médico → finalização, com tempo real e privacidade', async ({ browser }) => {
   const name = `E2E Paciente Fictícia ${Date.now().toString(36)}`;
   const panel = await open(browser);
-  await panel.goto('/painel-chamada');
+  await panel.goto(PANEL);
   const rec = await open(browser, 'recepcao');
   const tri = await open(browser, 'triagem');
   const doc = await open(browser, 'medico');
