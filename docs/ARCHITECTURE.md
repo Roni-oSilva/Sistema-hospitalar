@@ -91,6 +91,23 @@ amigáveis) e o trigger `attendances_guard` (garantia no banco). Toda transiçã
 - Sem conexão, as filas passam a se atualizar a cada 15 s e o topo da tela avisa.
 - Painel público: namespace `/painel`, sem login, opcionalmente protegido por chave; recebe **só** senha, ATD e consultório.
 
+## 6.1 Operação sem internet e rede instável
+
+O servidor fica **dentro do hospital**; nada no sistema chama serviços de fora (fontes empacotadas, CSP `'self'`,
+telemetria desligada). A queda da internet não muda nada. O que o código trata é a **rede local** oscilando
+(detalhes de implantação em [SEM-INTERNET.md](SEM-INTERNET.md)):
+
+| Risco | Como foi tratado |
+|---|---|
+| Resposta perdida depois de o servidor gravar | `Idempotency-Key` + reenvio automático (até ~15 s) — `IdempotencyInterceptor` devolve a resposta original |
+| Texto perdido ao recarregar ou ao expirar a sessão durante a queda | rascunho local por usuário (`lib/drafts.ts`, sessionStorage) em triagem, consulta e cadastro, restaurado só se a versão no servidor for a mesma |
+| Tela que some quando uma atualização falha | telas só bloqueiam sem dados (`LoadError`); com dados, aviso discreto e o formulário continua |
+| Ação que dispara sozinha minutos depois | React Query com `networkMode: 'always'` (falha na hora, com mensagem) |
+| Ninguém percebe que caiu | faixa "Sem conexão com o servidor desde HH:MM", verificação a cada 5 s, atualização ao voltar |
+| Relógio errado nos PCs sem internet | telas usam a hora do servidor (cabeçalho `Date`, `lib/clock.ts`) |
+| TV muda depois de reiniciar / chamadas perdidas | painel pede um toque quando o navegador bloqueia o som; anuncia chamadas recentes recebidas na reconexão (sem repetir) |
+| Nginx preso no IP antigo / 502 parado | `resolver` do Docker a cada 10 s; página "o sistema está iniciando" que se recarrega |
+
 ## 7. Decisões de interface
 
 Modo “operar”: escaneabilidade e velocidade acima de expressão. Identidade visual da referência aprovada

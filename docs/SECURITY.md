@@ -72,6 +72,18 @@ mesmo (evita trancar todos fora do sistema).
 - Relatórios: só agregados; grupos de acessibilidade com menos de 3 casos aparecem como “<3”.
 - Bilhete impresso: senha, ATD e horário — sem nome.
 
+## Rede instável e rascunhos locais
+
+- **Rascunho do que não foi salvo** (triagem, consulta, cadastro) fica no `sessionStorage` do navegador: só na aba
+  aberta, apagado ao fechar a aba, separado por usuário, apagado ao sair do sistema e quando outra pessoa entra na
+  mesma aba. Nunca no `localStorage` nem no servidor. Serve para não perder texto quando a rede cai e a tela é
+  recarregada ou a sessão expira no meio.
+- **Gravações idempotentes**: o navegador manda `Idempotency-Key` em toda gravação (menos login/logout) e reenvia
+  sozinho, com a mesma chave, se a resposta se perder. A API guarda o resultado por 10 min, por usuário, conferindo
+  o conteúdo: o reenvio recebe a resposta original e não duplica sinais vitais, diagnósticos ou prescrições. Uma
+  gravação que falhou não é lembrada (nada foi gravado).
+- "Sair" sem conexão **não finge** que saiu: avisa que a sessão continua aberta.
+
 ## Segredos e ambientes
 
 - Nenhum segredo no código ou no git: `DATABASE_URL`, `PUBLIC_PANEL_KEY`, senhas de bootstrap e frase-senha do
@@ -89,6 +101,8 @@ mesmo (evita trancar todos fora do sistema).
 3. **2º fator (MFA)**: não implementado; recomendado para administradores se o sistema for exposto fora da intranet.
 4. **Painel público**: sem `PUBLIC_PANEL_KEY`, qualquer um na rede vê senhas/ATD/consultórios (dados não
    identificáveis, mas configure a chave em produção).
-5. **Catálogo CID-10 e de medicamentos**: texto livre com validação de formato; integração com catálogos oficiais é
+5. **Portas e firewall**: as portas publicadas pelo Docker passam por cima do `ufw`. Publique só no IP da rede do
+   hospital (`HMU_BIND_IP`) e nunca abra as portas do sistema no roteador; acesso remoto só por VPN.
+6. **Catálogo CID-10 e de medicamentos**: texto livre com validação de formato; integração com catálogos oficiais é
    evolução futura.
-6. Faça teste de intrusão independente e um RIPD (Relatório de Impacto à Proteção de Dados) antes de dados reais.
+7. Faça teste de intrusão independente e um RIPD (Relatório de Impacto à Proteção de Dados) antes de dados reais.

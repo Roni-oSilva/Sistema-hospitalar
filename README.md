@@ -21,6 +21,8 @@ O paciente é cadastrado **uma vez**; recepção, triagem e médico trabalham so
 | [DATABASE.md](docs/DATABASE.md) | Tabelas, relacionamentos, travas no banco (índices parciais, CHECKs, triggers), migrations, seed |
 | [API.md](docs/API.md) | Endpoints, permissões exigidas, erros, tempo real |
 | [SECURITY.md](docs/SECURITY.md) | Autenticação, sessões, RBAC, CSRF, auditoria, privacidade/LGPD, limitações conhecidas |
+| [SEM-INTERNET.md](docs/SEM-INTERNET.md) | **Funcionar sem internet**: servidor no hospital, rede, nome local, hora, certificado, TV, backups em HD, kit offline, o que comprar e o teste "puxe o cabo" |
+| [CONTINGENCIA.md](docs/CONTINGENCIA.md) | Procedimento em papel (para imprimir) quando o servidor ou a rede do hospital caem, e como digitar depois |
 | [DEPLOY.md](docs/DEPLOY.md) | Docker, Nginx/HTTPS, migrations, 1º administrador, backup, restauração, recuperação de desastre |
 | [ENVIRONMENT.md](docs/ENVIRONMENT.md) | Todas as variáveis de ambiente e a separação development / staging / production |
 
@@ -88,14 +90,16 @@ Painel público (TV): <http://localhost:3000/painel-chamada>.
 
 ```bash
 npm test               # shared (unitários) + API (e2e em PostgreSQL real: os 13 fluxos críticos + segurança)
-npm run test:e2e       # navegador: fluxo completo com 4 usuários simultâneos (precisa de `npm run dev` + seed)
+npm run test:e2e       # navegador: fluxo completo com 4 usuários simultâneos + rede instável (precisa de `npm run dev` + seed)
 npm run lint && npm run typecheck
 ```
 
 A suíte da API **recria o schema** do banco de testes a cada execução e se recusa a rodar se o nome do banco não
 terminar em `_test`. Os 13 testes do requisito estão em `apps/api/test/flow.e2e-spec.ts` (TESTE 1 a TESTE 13);
-concorrência real (requisições paralelas), imutabilidade no banco, sessão, CSRF e tempo real em
-`apps/api/test/security-integrity.e2e-spec.ts`.
+concorrência real (requisições paralelas), imutabilidade no banco, sessão, CSRF, tempo real e gravações
+idempotentes em `apps/api/test/security-integrity.e2e-spec.ts`. No navegador, `e2e/tests/rede-instavel.spec.ts`
+derruba a rede de propósito: resposta perdida (não duplica), servidor fora com recarga da tela (o texto volta) e TV
+desconectada (a chamada é anunciada quando ela reconecta).
 
 ## Build e produção
 

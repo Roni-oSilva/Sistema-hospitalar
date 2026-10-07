@@ -10,6 +10,10 @@ Base: `/api` (mesma origem do site, via Nginx). JSON. Datas em ISO-8601 UTC.
 - **Permissões**: cada endpoint declara a permissão exigida (negar por padrão). Ver catálogo em
   `packages/shared/src/permissions.ts` e a matriz em SECURITY.md.
 - **Concorrência**: edições enviam `expectedVersion`; se o registro mudou, `409 EDIT_CONFLICT`.
+- **Idempotência**: gravações autenticadas podem enviar `Idempotency-Key` (o site envia em toda gravação, menos
+  `/auth/*`). Reenviar a mesma chave com o mesmo conteúdo em até 10 min devolve a resposta original (cabeçalho
+  `Idempotent-Replay: true`) sem gravar de novo; um reenvio que chega durante a primeira tentativa espera por ela; a
+  mesma chave com outro conteúdo → `422 IDEMPOTENCY_KEY_REUSED`. Respostas de erro não são lembradas.
 
 ### Erros (nunca técnicos)
 
